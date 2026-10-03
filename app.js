@@ -398,6 +398,7 @@ function setPage(page) {
     dashboard:['Tổng quan','Theo dõi tiến độ thu theo thời gian thực trên thiết bị này'],
     students:['Học sinh','Danh sách và số phải thu chi tiết theo từng học sinh'],
     fees:['Khoản thu','Theo dõi riêng bảo hiểm, dịch vụ khác và từng nội dung dịch vụ'],
+    'fee-setup':['Thiết lập khoản thu','Tạo và phân giao khoản thu theo toàn trường, khối, lớp hoặc học sinh'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
     imports:['Nhập dữ liệu','Cập nhật danh sách học sinh và báo cáo thu gần nhất'],
     history:['Tra cứu & báo cáo','Lịch sử các lần nhập dữ liệu trên thiết bị này'],
@@ -480,16 +481,18 @@ function totals(students, transactions) {
   return { due, paid, remain, dueItems, paidItems, unpaidItems:Math.max(0,dueItems-paidItems), paidByStudent, summaries, pct:due ? Math.min(100,Math.round(paid/due*100)) : 0 };
 }
 function renderStudents(students, transactions) {
-  const { paidByStudent } = totals(students, transactions); const query = slug($('#studentSearch')?.value || '');
-  const filtered = students.filter(s => !query || slug(`${s.code} ${s.name} ${s.className}`).includes(query));
+  const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
+  const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  const query = slug($('#studentSearch')?.value || '');
+  const filtered = students.filter(s => !query || slug(`${s.code} ${s.name} ${s.className} ${s.phone||''} ${s.personalId||''} ${s.fatherName||''} ${s.motherName||''}`).includes(query));
   $('#studentCountLabel').textContent = `${students.length.toLocaleString('vi-VN')} học sinh`;
   $('#studentsTable').innerHTML = filtered.length ? filtered.map(s => {
-    const due = studentDueByCategory(s); const paid = paidByStudent.get(s.code) || {};
-    const insPaid = num(paid.insurance), mandatoryPaid=num(paid.mandatory), svcPaid = num(paid.service), otherPaid=num(paid.other);
-    const totalDue=studentDueItems(s).reduce((sum,x)=>sum+x.amount,0);
-    const totalRemain = Math.max(0,totalDue-(insPaid+mandatoryPaid+svcPaid+otherPaid));
-    return `<tr><td><strong>${escapeHTML(s.code)}</strong></td><td>${escapeHTML(s.name)}</td><td>${escapeHTML(s.className || '—')}</td><td>${money(due.insurance)}</td><td>${money(insPaid)}</td><td class="remain-cell">${money(Math.max(0,due.insurance-insPaid))}</td><td>${money(due.mandatory)}</td><td>${money(mandatoryPaid)}</td><td class="remain-cell">${money(Math.max(0,due.mandatory-mandatoryPaid))}</td><td>${money(Math.max(0,due.other-otherPaid))}</td><td><strong>${money(totalRemain)}</strong></td></tr>`;
-  }).join('') : `<tr><td colspan="11" class="empty-cell">${students.length ? 'Không tìm thấy học sinh phù hợp.' : 'Chưa có học sinh. Hãy tải file danh sách ban đầu.'}</td></tr>`;
+    const items=studentDueItems(s);const due=items.reduce((sum,x)=>sum+x.amount,0);
+    const paid=items.filter(item=>paidByItem.has(`${s.code}|${item.id}`)).reduce((sum,x)=>sum+x.amount,0);
+    const parent=[s.fatherName,s.motherName].filter(Boolean).join(' / ');
+    const contact=[parent,s.phone].filter(Boolean).join(' · ');
+    return `<tr class="student-master-row" data-student-code="${escapeHTML(s.code)}"><td><strong>${escapeHTML(s.code)}</strong></td><td><strong>${escapeHTML(s.name)}</strong></td><td>${escapeHTML(s.className || '—')}</td><td>${escapeHTML(s.birthDate||'—')}</td><td class="student-contact-cell">${escapeHTML(contact||'—')}</td><td>${items.length}</td><td>${money(due)}</td><td>${money(paid)}</td><td class="remain-cell"><strong>${money(Math.max(0,due-paid))}</strong></td><td><button class="text-button student-detail-button" data-student-code="${escapeHTML(s.code)}">Chi tiết ›</button></td></tr>`;
+  }).join('') : `<tr><td colspan="10" class="empty-cell">${students.length ? 'Không tìm thấy học sinh phù hợp.' : 'Chưa có học sinh. Hãy tải file danh sách gốc của trường.'}</td></tr>`;
 }
 function renderClasses(students, transactions) {
   const filter=$('#classFeeFilter')?.value||'all';
