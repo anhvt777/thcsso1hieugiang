@@ -1,6 +1,6 @@
 /* SchoolCollect · Local-first. Student and payment data never leave this browser. */
 const DB_NAME = 'so-thu-hoc-sinh-hieugiang-local';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const FEES = [
   { key: 'insurance', label: 'Bảo hiểm y tế (BHYT)', short: 'BHYT' },
   { key: 'mandatory', label: 'Bảo hiểm thân thể (BHTT)', short: 'BHTT' },
@@ -29,6 +29,7 @@ function openDatabase() {
       if (!d.objectStoreNames.contains('transactions')) d.createObjectStore('transactions', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('history')) d.createObjectStore('history', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+      if (!d.objectStoreNames.contains('receipts')) d.createObjectStore('receipts', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -56,8 +57,8 @@ async function putMany(store, entries) {
 }
 async function clearAll() {
   await new Promise((resolve, reject) => {
-    const tx = db.transaction(['students', 'transactions', 'history', 'meta'], 'readwrite');
-    ['students', 'transactions', 'history', 'meta'].forEach(name => tx.objectStore(name).clear());
+    const tx = db.transaction(['students', 'transactions', 'history', 'meta', 'receipts'], 'readwrite');
+    ['students', 'transactions', 'history', 'meta', 'receipts'].forEach(name => tx.objectStore(name).clear());
     tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
   });
 }
@@ -444,6 +445,7 @@ function setPage(page) {
     students:['Học sinh','Danh sách và số phải thu chi tiết theo từng học sinh'],
     fees:['Khoản thu','Theo dõi riêng bảo hiểm, dịch vụ khác và từng nội dung dịch vụ'],
     'fee-setup':['Thiết lập khoản thu','Tạo và phân giao khoản thu theo toàn trường, khối, lớp hoặc học sinh'],
+    receipts:['Phiếu thu / Xác nhận','Phát hành chứng từ từ các món đã đối soát thành công'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
     imports:['Nhập dữ liệu','Cập nhật danh sách học sinh và báo cáo thu gần nhất'],
     history:['Tra cứu & báo cáo','Lịch sử các lần nhập dữ liệu trên thiết bị này'],
