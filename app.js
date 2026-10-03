@@ -649,6 +649,101 @@ async function generateQrs(){
   $('#downloadQrs').onclick=async()=>{const blob=await zip.generateAsync({type:'blob'});download(`SchoolCollect_QR_${new Date().toISOString().slice(0,10)}.zip`,blob,'application/zip');};
   $('#downloadQrs').hidden=false;
 }
+function feeCatalogRecord(items=[]){return {key:'feeCatalog',items};}
+async function getFeeCatalog(){const rec=await request('meta','get','feeCatalog');return Array.isArray(rec?.items)?rec.items:[];}
+function feeSafeCode(value,max=24){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,max);}
+function buildPaymentCode(prefix,studentCode,feeCode){
+  const a=feeSafeCode(prefix,6),b=feeSafeCode(studentCode,14),d=feeSafeCode(feeCode,8);
+  return (a+b+d).slice(0,25);
+}
+function selectedValues(select){return [...select.selectedOptions].map(o=>o.value);}
+function gradeOf(className){const m=String(className||'').trim().match(/^(\d{1,2})/);return m?m[1]:'';}
+function feeTargetStudents(students,scope,targets){
+  if(scope==='all')return students;
+  const set=new Set(targets);
+  if(scope==='grade')return students.filter(s=>set.has(gradeOf(s.className)));
+  if(scope==='class')return students.filter(s=>set.has(s.className));
+  if(scope==='student')return students.filter(s=>set.has(s.code));
+  return [];
+}
+function populateFeeTargets(students){
+  const scope=$('#feeScope')?.value||'all',select=$('#feeTargets');if(!select)return;
+  if(scope==='all'){select.innerHTML='<option value="all" selected>Toàn bộ học sinh hiện có</option>';select.disabled=true;$('#feeTargetSummary').textContent=`${students.length} học sinh`;return;}
+  select.disabled=false;
+  let options=[];
+  if(scope==='grade')options=[...new Set(students.map(s=>gradeOf(s.className)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b)).map(x=>[x,`Khối ${x}`]);
+  if(scope==='class')options=[...new Set(students.map(s=>s.className).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true})).map(x=>[x,x]);
+  if(scope==='student')options=[...students].sort((a,b)=>a.className.localeCompare(b.className,'vi',{numeric:true})||a.name.localeCompare(b.name,'vi')).map(s=>[s.code,`${s.className} · ${s.name} · ${s.code}`]);
+  select.innerHTML=options.map(([v,l])=>`<option value="${escapeHTML(v)}">${escapeHTML(l)}</option>`).join('');
+  $('#feeTargetSummary').textContent=options.length?'Chưa chọn đối tượng':'Chưa có dữ liệu phù hợp';
+}
+function updateFeePreview(students){
+  const prefix=$('#feePrefix')?.value||'HG',code=$('#feeCode')?.value||'KHOAN',sample=students[0];
+  $('#feeCodePreview').textContent=`${feeSafeCode(prefix)||'HG'} + Mã MOET + ${feeSafeCode(code)||'MÃ KHOẢN'}`;
+  $('#feeCodePreviewExample').textContent=sample?`Ví dụ: ${buildPaymentCode(prefix,sample.code,code)} · ${sample.name}`:'Ví dụ sẽ hiển thị sau khi có danh sách học sinh.';
+}
+function resetFeeForm(students=[]){
+  $('#feeEditingId').value='';$('#feeBuilderTitle').textContent='Tạo khoản thu';$('#feeName').value='';$('#feeCode').value='';$('#feeAmount').value='';$('#feeCategory').value='service';$('#feePrefix').value='HG';$('#feeScope').value='all';$('#cancelFeeEdit').hidden=true;$('#saveFeeAssignment').textContent='Tạo & phân giao';populateFeeTargets(students);updateFeePreview(students);
+}
+function feeItemAssignmentCount(students,id){return students.reduce((n,s)=>n+studentDueItems(s).filter(x=>x.catalogId===id).length,0);}
+function renderFeeCatalog(catalog,students){
+  $('#feeCatalogCount').textContent=`${catalog.length} khoản`;
+  $('#feeCatalogList').innerHTML=catalog.length?catalog.map(f=>{
+    const count=feeItemAssignmentCount(students,f.id);
+    const scope=f.lastScope==='all'?'Toàn trường':f.lastScope==='grade'?'Theo khối':f.lastScope==='class'?'Theo lớp':'Theo học sinh';
+    return `<article class="fee-catalog-item"><div><span class="category-badge ${f.category==='service'?'service':''}">${escapeHTML(f.code)}</span><h3>${escapeHTML(f.name)}</h3><p>${money(f.amount)} · ${scope} · ${count} học sinh</p></div><div class="fee-catalog-actions"><button class="button button-outline button-small" data-fee-edit="${f.id}">Sửa</button><button class="button button-danger button-small" data-fee-delete="${f.id}">Xóa</button></div></article>`;
+  }).join(''):'<div class="empty-inline">Chưa có khoản thu. Tạo khoản đầu tiên ở biểu mẫu bên trái.</div>';
+}
+async function renderFeeSetup(students){
+  const catalog=await getFeeCatalog();renderFeeCatalog(catalog,students);populateFeeTargets(students);updateFeePreview(students);
+}
+async function saveFeeAssignment(){
+  const students=await all('students');if(!students.length)return toast('Hãy nhập danh sách học sinh trước khi tạo khoản thu.',true);
+  const id=$('#feeEditingId').value||crypto.randomUUID(),name=$('#feeName').value.trim(),code=feeSafeCode($('#feeCode').value,8),amount=parseAmount($('#feeAmount').value),category=$('#feeCategory').value,prefix=feeSafeCode($('#feePrefix').value||'HG',6),scope=$('#feeScope').value,targets=selectedValues($('#feeTargets'));
+  if(!name||!code||amount<=0)return toast('Hãy nhập tên khoản, mã khoản và số tiền hợp lệ.',true);
+  if(scope!=='all'&&!targets.length)return toast('Hãy chọn ít nhất một đối tượng áp dụng.',true);
+  const catalog=await getFeeCatalog();const duplicate=catalog.find(f=>f.id!==id&&feeSafeCode(f.code)===code);if(duplicate)return toast('Mã khoản đã tồn tại. Hãy dùng mã khác.',true);
+  const chosen=feeTargetStudents(students,scope,targets);if(!chosen.length)return toast('Không có học sinh nào trong phạm vi đã chọn.',true);
+  const codes=new Set();for(const s of students)for(const item of studentDueItems(s))if(item.paymentCode)codes.add(slug(item.paymentCode));
+  const chosenSet=new Set(chosen.map(s=>s.code));const now=new Date().toISOString();
+  const updated=students.map(s=>{
+    const items=studentDueItems(s).filter(item=>item.catalogId!==id);
+    if(chosenSet.has(s.code)){
+      const paymentCode=buildPaymentCode(prefix,s.code,code),paymentKey=slug(paymentCode);
+      if(!paymentCode||[...codes].some(existing=>existing===paymentKey&&!studentDueItems(s).some(x=>x.catalogId===id&&slug(x.paymentCode)===paymentKey)))throw new Error(`Mã khách hàng bị trùng: ${paymentCode}. Hãy đổi tiền tố hoặc mã khoản.`);
+      items.push({id:`catalog:${id}:${slug(s.code)}`,catalogId:id,paymentCode,category,name,amount,feeCode:code,createdAt:now});
+    }
+    const due=items.reduce((sum,x)=>sum+num(x.amount),0),dueByCategory=items.reduce((o,x)=>(o[x.category]=(o[x.category]||0)+num(x.amount),o),{insurance:0,mandatory:0,service:0,other:0});
+    return {...s,due,dueItems:items,dueByCategory,hasFeeBreakdown:true,updatedAt:now};
+  });
+  await putMany('students',updated);
+  const entry={id,name,code,amount,category,prefix,lastScope:scope,lastTargets:scope==='all'?[]:targets,updatedAt:now,createdAt:catalog.find(f=>f.id===id)?.createdAt||now};
+  const next=[...catalog.filter(f=>f.id!==id),entry];await request('meta','put',feeCatalogRecord(next));
+  await refresh();resetFeeForm(await all('students'));toast(`Đã phân giao “${name}” cho ${chosen.length} học sinh.`);
+}
+async function editFee(id){
+  const [catalog,students]=await Promise.all([getFeeCatalog(),all('students')]);const f=catalog.find(x=>x.id===id);if(!f)return;
+  $('#feeEditingId').value=f.id;$('#feeBuilderTitle').textContent='Cập nhật khoản thu';$('#feeName').value=f.name;$('#feeCode').value=f.code;$('#feeAmount').value=f.amount;$('#feeCategory').value=f.category;$('#feePrefix').value=f.prefix||'HG';$('#feeScope').value=f.lastScope||'all';populateFeeTargets(students);
+  const targetSet=new Set(f.lastTargets||[]);[...$('#feeTargets').options].forEach(o=>o.selected=targetSet.has(o.value));$('#cancelFeeEdit').hidden=false;$('#saveFeeAssignment').textContent='Lưu & phân giao lại';updateFeePreview(students);setPage('fee-setup');
+}
+async function deleteFee(id){
+  const [catalog,students,stored]=await Promise.all([getFeeCatalog(),all('students'),all('transactions')]);const f=catalog.find(x=>x.id===id);if(!f)return;
+  const transactions=reconcileTransactions(students,stored);const assignedIds=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));
+  if(transactions.some(t=>t.paymentStatus==='valid'&&assignedIds.has(`${t.studentCode}|${t.matchedDueItemId}`)))return toast('Khoản này đã có giao dịch thu hợp lệ nên không thể xóa.',true);
+  if(!confirm(`Xóa khoản “${f.name}” và toàn bộ phân giao chưa thu?`))return;
+  const updated=students.map(s=>{const items=studentDueItems(s).filter(x=>x.catalogId!==id);return {...s,dueItems:items,due:items.reduce((a,x)=>a+x.amount,0),dueByCategory:items.reduce((o,x)=>(o[x.category]=(o[x.category]||0)+x.amount,o),{insurance:0,mandatory:0,service:0,other:0})};});
+  await putMany('students',updated);await request('meta','put',feeCatalogRecord(catalog.filter(x=>x.id!==id)));await refresh();toast('Đã xóa khoản thu chưa phát sinh thanh toán.');
+}
+async function openStudentProfile(code){
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]);const s=students.find(x=>x.code===code);if(!s)return;const tx=reconcileTransactions(students,stored);const paid=new Set(tx.filter(t=>t.paymentStatus==='valid'&&t.studentCode===code).map(t=>t.matchedDueItemId));
+  $('#studentProfileTitle').textContent=`${s.name} · ${s.className}`;$('#studentProfileSubtitle').textContent=`Mã MOET: ${s.code}`;
+  const info=[['Giới tính',s.gender],['Ngày sinh',s.birthDate],['SĐD cá nhân',s.personalId],['Dân tộc',s.ethnicity],['Tên cha',s.fatherName],['Tên mẹ',s.motherName],['Điện thoại',s.phone]].filter(x=>x[1]);
+  $('#studentProfileInfo').innerHTML=info.map(([k,v])=>`<div><span>${k}</span><strong>${escapeHTML(v)}</strong></div>`).join('')||'<div class="empty-inline">Chưa có thông tin hồ sơ bổ sung.</div>';
+  const items=studentDueItems(s);$('#studentProfileFees').innerHTML=items.length?items.map(item=>`<div class="student-profile-fee ${paid.has(item.id)?'paid':''}"><div><strong>${escapeHTML(item.name)}</strong><small>${escapeHTML(item.paymentCode||'Chưa có mã thanh toán')}</small></div><b>${money(item.amount)}</b><span>${paid.has(item.id)?'Đã thu':'Chưa thu'}</span></div>`).join(''):'<div class="empty-inline">Học sinh chưa được phân giao khoản thu.</div>';
+  $('#studentProfileBackdrop').classList.add('open');
+}
+function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('open');}
+
 async function refresh() {
   const [students,storedTransactions,history,qrConfig]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount')]);
   const transactions=reconcileTransactions(students,storedTransactions);
