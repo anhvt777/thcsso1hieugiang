@@ -815,6 +815,137 @@ async function openStudentProfile(code){
 }
 function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('open');}
 
+function receiptConfigDefaults(){
+  return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',prefix:'XN',preparer:'',accountant:'',head:''};
+}
+async function getReceiptConfig(){return {...receiptConfigDefaults(),...((await request('meta','get','receiptConfig'))||{})};}
+function receiptPaymentKey(student,item,txn){return `${student.code}|${item.id}|${txn.id}`;}
+function receiptCandidates(students,transactions){
+  const byStudent=new Map(students.map(s=>[s.code,s]));
+  return transactions.filter(t=>t.paymentStatus==='valid'&&t.studentCode&&t.matchedDueItemId).map(t=>{
+    const student=byStudent.get(t.studentCode);if(!student)return null;
+    const item=studentDueItems(student).find(x=>x.id===t.matchedDueItemId);if(!item)return null;
+    return {paymentKey:receiptPaymentKey(student,item,t),student,item,txn:t};
+  }).filter(Boolean);
+}
+function receiptStateFor(candidate,receipts){
+  const related=receipts.filter(r=>r.paymentKey===candidate.paymentKey).sort((a,b)=>(b.issuedAt||'').localeCompare(a.issuedAt||''));
+  const active=related.find(r=>r.status==='issued');
+  if(active)return {status:'issued',receipt:active};
+  if(related.length)return {status:'cancelled',receipt:related[0]};
+  return {status:'ready',receipt:null};
+}
+function receiptStatusLabel(status){return status==='issued'?'Đã phát hành':status==='cancelled'?'Đã hủy':'Chưa phát hành';}
+function receiptAmountWords(n){
+  n=num(n);if(n===0)return 'Không đồng';
+  const digit=['không','một','hai','ba','bốn','năm','sáu','bảy','tám','chín'];
+  const read3=(v,full=false)=>{
+    const h=Math.floor(v/100),t=Math.floor(v%100/10),u=v%10;const out=[];
+    if(h||full){out.push(digit[h],'trăm');}
+    if(t>1){out.push(digit[t],'mươi');if(u===1)out.push('mốt');else if(u===5)out.push('lăm');else if(u)out.push(digit[u]);}
+    else if(t===1){out.push('mười');if(u===5)out.push('lăm');else if(u)out.push(digit[u]);}
+    else if(u){if(h||full)out.push('lẻ');out.push(digit[u]);}
+    return out.join(' ');
+  };
+  const units=['','nghìn','triệu','tỷ','nghìn tỷ','triệu tỷ'];const chunks=[];let x=n;
+  while(x>0){chunks.push(x%1000);x=Math.floor(x/1000);}
+  const parts=[];for(let i=chunks.length-1;i>=0;i--){if(!chunks[i])continue;parts.push(read3(chunks[i],i<chunks.length-1&&chunks[i]<100),units[i]);}
+  const s=parts.join(' ').replace(/\s+/g,' ').trim();return s.charAt(0).toLocaleUpperCase('vi-VN')+s.slice(1)+' đồng';
+}
+async function saveReceiptConfig(){
+  const config={key:'receiptConfig',parentUnit:$('#receiptParentUnit').value.trim(),schoolName:$('#receiptSchoolName').value.trim(),schoolAddress:$('#receiptSchoolAddress').value.trim(),unitCode:$('#receiptUnitCode').value.trim(),prefix:feeSafeCode($('#receiptPrefix').value||'XN',6)||'XN',preparer:$('#receiptPreparer').value.trim(),accountant:$('#receiptAccountant').value.trim(),head:$('#receiptHead').value.trim()};
+  if(!config.schoolName)return toast('Hãy nhập tên đơn vị trên chứng từ.',true);
+  await request('meta','put',config);$('#receiptPrefix').value=config.prefix;toast('Đã lưu thông tin chứng từ trên thiết bị này.');
+}
+function fillReceiptConfig(config){
+  const map={receiptParentUnit:'parentUnit',receiptSchoolName:'schoolName',receiptSchoolAddress:'schoolAddress',receiptUnitCode:'unitCode',receiptPrefix:'prefix',receiptPreparer:'preparer',receiptAccountant:'accountant',receiptHead:'head'};
+  Object.entries(map).forEach(([id,key])=>{const el=$('#'+id);if(el)el.value=config[key]||'';});
+}
+async function nextReceiptNumbers(count,config){
+  const year=new Date().getFullYear(),key=`receiptSeq:${year}`,seq=await request('meta','get',key);let current=num(seq?.value);
+  const out=[];for(let i=0;i<count;i++){current++;out.push({year,seq:current,number:`${config.prefix||'XN'}-${year}-${String(current).padStart(6,'0')}`});}
+  await request('meta','put',{key,value:current});return out;
+}
+function receiptVerificationCode(number,id){return `RCT-${String(number).replace(/[^A-Z0-9]/gi,'').slice(-10).toUpperCase()}-${String(id).slice(0,6).toUpperCase()}`;}
+async function issueReceiptCandidates(candidates,{print=true}={}){
+  if(!candidates.length)return toast('Không có món phù hợp để phát hành.',true);
+  const [receipts,config]=await Promise.all([all('receipts'),getReceiptConfig()]);
+  const issuable=candidates.filter(x=>!receipts.some(r=>r.paymentKey===x.paymentKey&&r.status==='issued'));
+  if(!issuable.length){if(print)printReceiptRecords(receipts.filter(r=>r.status==='issued'&&candidates.some(x=>x.paymentKey===r.paymentKey)),config);return toast('Các món đã chọn đều đã có chứng từ.');}
+  const nums=await nextReceiptNumbers(issuable.length,config),now=new Date().toISOString();
+  const records=issuable.map((x,i)=>{
+    const id=crypto.randomUUID(),n=nums[i];
+    return {id,paymentKey:x.paymentKey,number:n.number,sequence:n.seq,year:n.year,status:'issued',issuedAt:now,receiptType:'payment_confirmation',paymentMethod:'Chuyển khoản/QR',verificationCode:receiptVerificationCode(n.number,id),studentCode:x.student.code,studentName:x.student.name,className:x.student.className||'',feeName:x.item.name,feeCode:x.item.feeCode||x.item.category||'',paymentCode:x.item.paymentCode||'',amount:x.item.amount,paymentDate:x.txn.date||'',transactionRef:x.txn.ref||x.txn.id,transactionId:x.txn.id,content:x.txn.content||'',snapshot:{parentUnit:config.parentUnit,schoolName:config.schoolName,schoolAddress:config.schoolAddress,unitCode:config.unitCode,preparer:config.preparer,accountant:config.accountant,head:config.head}};
+  });
+  await putMany('receipts',records);await request('history','put',{id:crypto.randomUUID(),kind:'Phát hành chứng từ',fileName:records.length===1?records[0].number:`${records.length} chứng từ`,rows:records.length,imported:records.length,detail:`Đã cấp ${records.length} chứng từ thanh toán`,at:now});
+  await refresh();toast(`Đã phát hành ${records.length} chứng từ.`);
+  if(print)printReceiptRecords(records,config);
+}
+function receiptRecordHtml(r,config){
+  const s={...config,...(r.snapshot||{})},cancelled=r.status==='cancelled';
+  return `<article class="receipt-print-sheet ${cancelled?'receipt-print-cancelled':''}">
+    <div class="receipt-print-top"><div><strong>${escapeHTML(s.parentUnit||'')}</strong><b>${escapeHTML(s.schoolName||'')}</b>${s.schoolAddress?`<span>${escapeHTML(s.schoolAddress)}</span>`:''}${s.unitCode?`<span>Mã đơn vị/MST: ${escapeHTML(s.unitCode)}</span>`:''}</div><div class="receipt-number"><span>Số chứng từ</span><strong>${escapeHTML(r.number)}</strong></div></div>
+    <h1>PHIẾU XÁC NHẬN THANH TOÁN</h1>
+    <div class="receipt-print-meta"><span>Ngày lập: ${escapeHTML(new Intl.DateTimeFormat('vi-VN').format(new Date(r.issuedAt)))}</span><span>Hình thức: ${escapeHTML(r.paymentMethod||'Chuyển khoản/QR')}</span></div>
+    <div class="receipt-print-person"><p><span>Học sinh</span><strong>${escapeHTML(r.studentName)}</strong></p><p><span>Mã MOET</span><strong>${escapeHTML(r.studentCode)}</strong></p><p><span>Lớp</span><strong>${escapeHTML(r.className||'—')}</strong></p></div>
+    <table class="receipt-print-table"><thead><tr><th>Khoản thu</th><th>Mã thanh toán</th><th>Ngày thanh toán</th><th>Số tiền</th></tr></thead><tbody><tr><td>${escapeHTML(r.feeName)}</td><td>${escapeHTML(r.paymentCode||'—')}</td><td>${escapeHTML(r.paymentDate||'—')}</td><td>${money(r.amount)}</td></tr></tbody></table>
+    <div class="receipt-print-amount"><span>Số tiền bằng chữ:</span><strong>${escapeHTML(receiptAmountWords(r.amount))}</strong></div>
+    <div class="receipt-print-bank"><span>Mã giao dịch ngân hàng: <b>${escapeHTML(r.transactionRef||'—')}</b></span><span>Mã kiểm tra: <b>${escapeHTML(r.verificationCode||'—')}</b></span></div>
+    ${cancelled?`<div class="receipt-cancel-stamp">ĐÃ HỦY · ${escapeHTML(r.cancelReason||'')}</div>`:''}
+    <div class="receipt-signatures"><div><strong>Người lập</strong><span>${escapeHTML(s.preparer||'')}</span></div><div><strong>Kế toán / Phụ trách kế toán</strong><span>${escapeHTML(s.accountant||'')}</span></div><div><strong>Thủ trưởng đơn vị</strong><span>${escapeHTML(s.head||'')}</span></div></div>
+    <p class="receipt-print-note">Chứng từ được lập từ dữ liệu giao dịch đã đối soát trên hệ thống quản lý thu của nhà trường. Đây không phải hóa đơn điện tử hoặc biên lai điện tử theo pháp luật về hóa đơn, phí và lệ phí.</p>
+  </article>`;
+}
+function printReceiptRecords(records,config){
+  if(!records.length)return toast('Không có chứng từ để in.',true);
+  const root=$('#receiptPrintRoot');root.innerHTML=records.sort((a,b)=>a.number.localeCompare(b.number)).map(r=>receiptRecordHtml(r,config)).join('');
+  document.body.classList.add('printing-receipts');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printing-receipts'),400);},80);
+}
+async function cancelReceipt(id){
+  const r=await request('receipts','get',id);if(!r||r.status!=='issued')return;
+  const reason=prompt('Nhập lý do hủy chứng từ (bắt buộc):');if(reason===null)return;if(!reason.trim())return toast('Cần nhập lý do hủy để lưu dấu vết.',true);
+  const updated={...r,status:'cancelled',cancelledAt:new Date().toISOString(),cancelReason:reason.trim()};await request('receipts','put',updated);
+  await request('history','put',{id:crypto.randomUUID(),kind:'Hủy chứng từ',fileName:r.number,rows:1,imported:0,detail:`Đã hủy ${r.number}: ${reason.trim()}`,at:updated.cancelledAt});
+  await refresh();toast(`Đã hủy ${r.number}. Số chứng từ được giữ trong lịch sử.`);
+}
+function receiptFilterCandidates(candidates,receipts){
+  const fee=$('#receiptFeeFilter')?.value||'all',cls=$('#receiptClassFilter')?.value||'all',stu=$('#receiptStudentFilter')?.value||'all',status=$('#receiptStatusFilter')?.value||'all',from=$('#receiptDateFrom')?.value||'',to=$('#receiptDateTo')?.value||'';
+  return candidates.filter(x=>{
+    const state=receiptStateFor(x,receipts);
+    const feeOk=fee==='all'||(fee.startsWith('catalog:')?x.item.catalogId===fee.slice(8):slug(x.item.name)===fee);
+    return feeOk&&(cls==='all'||x.student.className===cls)&&(stu==='all'||x.student.code===stu)&&(status==='all'||state.status===status)&&(!from||(x.txn.date||'')>=from)&&(!to||(x.txn.date||'')<=to);
+  });
+}
+function populateReceiptFilters(candidates,catalog){
+  const feeEl=$('#receiptFeeFilter'),classEl=$('#receiptClassFilter'),stuEl=$('#receiptStudentFilter');if(!feeEl)return;
+  const current={fee:feeEl.value,cls:classEl.value,stu:stuEl.value};
+  const exact=[...new Map(candidates.map(x=>[x.item.catalogId?`catalog:${x.item.catalogId}`:slug(x.item.name),x.item])).entries()];
+  feeEl.innerHTML='<option value="all">Tất cả khoản thu</option>'+exact.sort((a,b)=>a[1].name.localeCompare(b[1].name,'vi')).map(([v,item])=>`<option value="${escapeHTML(v)}">${escapeHTML(item.name)} · ${money(item.amount)}</option>`).join('');
+  const classes=[...new Set(candidates.map(x=>x.student.className).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
+  classEl.innerHTML='<option value="all">Tất cả lớp</option>'+classes.map(v=>`<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join('');
+  const students=[...new Map(candidates.map(x=>[x.student.code,x.student])).values()].sort((a,b)=>a.className.localeCompare(b.className,'vi',{numeric:true})||a.name.localeCompare(b.name,'vi'));
+  stuEl.innerHTML='<option value="all">Tất cả học sinh</option>'+students.map(s=>`<option value="${escapeHTML(s.code)}">${escapeHTML(s.className)} · ${escapeHTML(s.name)}</option>`).join('');
+  if([...feeEl.options].some(o=>o.value===current.fee))feeEl.value=current.fee;if([...classEl.options].some(o=>o.value===current.cls))classEl.value=current.cls;if([...stuEl.options].some(o=>o.value===current.stu))stuEl.value=current.stu;
+}
+async function renderReceiptPage(students,transactions){
+  const [receipts,catalog,config]=await Promise.all([all('receipts'),getFeeCatalog(),getReceiptConfig()]);fillReceiptConfig(config);
+  const candidates=receiptCandidates(students,transactions);populateReceiptFilters(candidates,catalog);
+  const states=candidates.map(x=>receiptStateFor(x,receipts));$('#receiptReadyCount').textContent=states.filter(x=>x.status==='ready').length;$('#receiptIssuedCount').textContent=receipts.filter(r=>r.status==='issued').length;$('#receiptCancelledCount').textContent=receipts.filter(r=>r.status==='cancelled').length;
+  const filtered=receiptFilterCandidates(candidates,receipts);$('#receiptFilterSummary').textContent=filtered.length?`${filtered.length} món đã thu phù hợp bộ lọc`:'Không có món đã thu phù hợp bộ lọc.';
+  $('#receiptTable').innerHTML=filtered.length?filtered.map(x=>{
+    const state=receiptStateFor(x,receipts),r=state.receipt;const statusClass=state.status==='issued'?'paid':state.status==='cancelled'?'cancelled':'ready';
+    const actions=state.status==='issued'?`<button class="text-button" data-receipt-print="${r.id}">In</button><button class="text-button danger-link" data-receipt-cancel="${r.id}">Hủy</button>`:`<button class="text-button" data-receipt-issue="${escapeHTML(x.paymentKey)}">${state.status==='cancelled'?'Phát hành lại':'Phát hành'}</button>`;
+    return `<tr><td>${escapeHTML(x.txn.date||'—')}</td><td><strong>${escapeHTML(r?.number||'—')}</strong></td><td>${escapeHTML(x.student.name)}</td><td>${escapeHTML(x.student.className||'—')}</td><td>${escapeHTML(x.item.name)}</td><td><strong>${money(x.item.amount)}</strong></td><td>${escapeHTML(x.txn.ref||x.txn.id.slice(0,14))}</td><td><span class="receipt-status ${statusClass}">${receiptStatusLabel(state.status)}</span></td><td><div class="receipt-row-actions">${actions}</div></td></tr>`;
+  }).join(''):'<tr><td colspan="9" class="empty-cell">Không có món đã thu phù hợp bộ lọc.</td></tr>';
+}
+async function exportReceiptRegister(){
+  const receipts=(await all('receipts')).sort((a,b)=>(a.number||'').localeCompare(b.number||''));
+  if(!receipts.length)return toast('Chưa có chứng từ để xuất sổ.',true);
+  const headers=['Số chứng từ','Trạng thái','Ngày lập','Ngày thanh toán','Mã MOET','Họ tên','Lớp','Khoản thu','Mã thanh toán','Số tiền','Mã giao dịch','Hình thức','Ngày hủy','Lý do hủy','Mã kiểm tra'];
+  const lines=receipts.map(r=>[r.number,receiptStatusLabel(r.status),r.issuedAt,r.paymentDate,r.studentCode,r.studentName,r.className,r.feeName,r.paymentCode,r.amount,r.transactionRef,r.paymentMethod,r.cancelledAt||'',r.cancelReason||'',r.verificationCode].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
+  download(`so-chung-tu-thu-${new Date().toISOString().slice(0,10)}.csv`,'\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
+}
+
 async function refresh() {
   const [students,storedTransactions,history,qrConfig]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount')]);
   const transactions=reconcileTransactions(students,storedTransactions);
