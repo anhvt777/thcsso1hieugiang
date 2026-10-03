@@ -946,6 +946,29 @@ async function exportReceiptRegister(){
   download(`so-chung-tu-thu-${new Date().toISOString().slice(0,10)}.csv`,'\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
 }
 
+async function currentReceiptContext(){
+  const [students,stored,receipts,config]=await Promise.all([all('students'),all('transactions'),all('receipts'),getReceiptConfig()]);
+  const transactions=reconcileTransactions(students,stored),candidates=receiptCandidates(students,transactions);
+  return {students,transactions,receipts,config,candidates,filtered:receiptFilterCandidates(candidates,receipts)};
+}
+async function issueFilteredReceipts(){
+  const ctx=await currentReceiptContext(),issuable=ctx.filtered.filter(x=>!ctx.receipts.some(r=>r.paymentKey===x.paymentKey&&r.status==='issued'));
+  if(!issuable.length)return toast('Không có món chưa phát hành trong bộ lọc hiện tại.',true);
+  if(issuable.length>1&&!confirm(`Phát hành ${issuable.length} chứng từ và mở cửa sổ In/Lưu PDF?`))return;
+  await issueReceiptCandidates(issuable,{print:true});
+}
+async function printIssuedFilteredReceipts(){
+  const ctx=await currentReceiptContext(),keys=new Set(ctx.filtered.map(x=>x.paymentKey)),records=ctx.receipts.filter(r=>r.status==='issued'&&keys.has(r.paymentKey));
+  if(!records.length)return toast('Không có chứng từ đã phát hành trong bộ lọc hiện tại.',true);
+  printReceiptRecords(records,ctx.config);
+}
+async function handleReceiptTableClick(e){
+  const issue=e.target.closest('[data-receipt-issue]'),print=e.target.closest('[data-receipt-print]'),cancel=e.target.closest('[data-receipt-cancel]');
+  if(issue){const ctx=await currentReceiptContext(),candidate=ctx.candidates.find(x=>x.paymentKey===issue.dataset.receiptIssue);if(candidate)await issueReceiptCandidates([candidate],{print:true});return;}
+  if(print){const [r,config]=await Promise.all([request('receipts','get',print.dataset.receiptPrint),getReceiptConfig()]);if(r)printReceiptRecords([r],config);return;}
+  if(cancel)await cancelReceipt(cancel.dataset.receiptCancel);
+}
+
 async function refresh() {
   const [students,storedTransactions,history,qrConfig]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount')]);
   const transactions=reconcileTransactions(students,storedTransactions);
@@ -962,7 +985,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);
+  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderReceiptPage(students,transactions);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -979,7 +1002,7 @@ async function backup() {
   const password=prompt('Đặt mật khẩu cho tệp sao lưu (ít nhất 8 ký tự):');if(password===null)return;
   if(password.length<8)return toast('Mật khẩu cần có ít nhất 8 ký tự.',true);
   try {
-    const data=JSON.stringify({version:1,createdAt:new Date().toISOString(),students:await all('students'),transactions:await all('transactions'),history:await all('history'),meta:await all('meta')});
+    const data=JSON.stringify({version:2,createdAt:new Date().toISOString(),students:await all('students'),transactions:await all('transactions'),history:await all('history'),meta:await all('meta'),receipts:await all('receipts')});
     const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
     const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
     const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt']);
@@ -997,7 +1020,7 @@ async function restore(file) {
     const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
     const raw=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,cipher);const data=JSON.parse(new TextDecoder().decode(raw));
     if(!confirm('Khôi phục sẽ thay thế toàn bộ dữ liệu hiện có trên máy này. Tiếp tục?'))return;
-    await clearAll();await Promise.all([putMany('students',data.students||[]),putMany('transactions',data.transactions||[]),putMany('history',data.history||[]),putMany('meta',data.meta||[])]);
+    await clearAll();await Promise.all([putMany('students',data.students||[]),putMany('transactions',data.transactions||[]),putMany('history',data.history||[]),putMany('meta',data.meta||[]),putMany('receipts',data.receipts||[])]);
     await refresh();toast('Đã khôi phục dữ liệu từ bản sao lưu.');
   } catch(e) { console.error(e);toast('Không mở được bản sao lưu. Kiểm tra đúng tệp và mật khẩu.',true); }
 }
@@ -1095,6 +1118,9 @@ function wire() {
   $('#saveFeeAssignment').onclick=()=>saveFeeAssignment().catch(e=>{console.error(e);toast(e.message||'Không tạo được khoản thu.',true);});
   $('#newFeeButton').onclick=async()=>resetFeeForm(await all('students'));$('#cancelFeeEdit').onclick=async()=>resetFeeForm(await all('students'));
   $('#feeCatalogList').addEventListener('click',e=>{const edit=e.target.closest('[data-fee-edit]'),del=e.target.closest('[data-fee-delete]');if(edit)editFee(edit.dataset.feeEdit);if(del)deleteFee(del.dataset.feeDelete);});
+  $('#saveReceiptConfig').onclick=saveReceiptConfig;$('#receiptConfigToggle').onclick=()=>$('#receiptConfigCard').classList.toggle('collapsed');
+  ['receiptFeeFilter','receiptClassFilter','receiptStudentFilter','receiptStatusFilter','receiptDateFrom','receiptDateTo'].forEach(id=>$(`#${id}`).addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderReceiptPage(students,reconcileTransactions(students,stored));}));
+  $('#issueFilteredReceipts').onclick=()=>issueFilteredReceipts().catch(e=>{console.error(e);toast(e.message||'Không phát hành được chứng từ.',true);});$('#printIssuedReceipts').onclick=()=>printIssuedFilteredReceipts().catch(e=>{console.error(e);toast('Không in được chứng từ.',true);});$('#exportReceiptRegister').onclick=exportReceiptRegister;$('#receiptTable').addEventListener('click',e=>handleReceiptTableClick(e).catch(err=>{console.error(err);toast(err.message||'Không thực hiện được thao tác chứng từ.',true);}));
   $('#classFeeFilter').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderClasses(students,reconcileTransactions(students,stored));});
   $('#exportClassFeeReport').onclick=()=>exportClassFeeReport().catch(e=>{console.error(e);toast('Không xuất được báo cáo Excel.',true);});
   $('#classTable').addEventListener('click',e=>{const row=e.target.closest('.class-summary-row');if(row)openClassDetail(row.dataset.className);});
