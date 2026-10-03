@@ -486,6 +486,15 @@ function reconcileTransactions(students, transactions) {
     if(!isSuccessfulBankStatus(t.bankStatus))return {...t,studentCode:student?.code||'',studentName:student?.name||'',matched:false,paymentStatus:'bank_not_successful',feeCategory:alias?.item.category||transactionCategory(t)};
     if(!student)return {...t,studentCode:'',studentName:'',matched:false,paymentStatus:reportedCode?'unmatched':'missing_code'};
     const studentItems=studentDueItems(student), category=alias?.item.category||transactionCategory(t), amount=num(t.amount);
+    if(t.sourceType==='cash'&&t.manualDueItemId){
+      const item=studentItems.find(x=>x.id===t.manualDueItemId);
+      if(!item)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'no_due',feeCategory:category};
+      if(item.amount!==amount)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
+      const key=`${student.code}|${item.id}`;
+      if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      claimed.add(key);
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,paymentChannel:'cash'};
+    }
     const candidates=alias?[alias.item]:category==='other'?[]:studentItems.filter(item=>!item.legacy&&item.category===category&&item.amount===amount);
     if(!candidates.length) {
       const categoryItems=studentItems.filter(item=>item.category===category);
@@ -820,7 +829,12 @@ function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('op
 function receiptConfigDefaults(){
   return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',transferPrefix:'XN',cashPrefix:'PT',preparer:'',cashier:'',accountant:'',head:''};
 }
-async function getReceiptConfig(){return {...receiptConfigDefaults(),...((await request('meta','get','receiptConfig'))||{})};}
+async function getReceiptConfig(){
+  const stored=(await request('meta','get','receiptConfig'))||{},base=receiptConfigDefaults();
+  const out={...base,...stored};
+  if(!stored.transferPrefix&&stored.prefix)out.transferPrefix=stored.prefix;
+  return out;
+}
 function receiptPaymentKey(student,item,txn){return `${student.code}|${item.id}|${txn.id}`;}
 function receiptCandidates(students,transactions){
   const byStudent=new Map(students.map(s=>[s.code,s]));
