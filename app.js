@@ -320,15 +320,30 @@ async function confirmImport() {
   const now = new Date().toISOString(); let summary;
   if (kind === 'students') {
     let items;
-    try { items = longFormat ? studentsFromFeeRows(dataRows,map,now) : dataRows.map(row => {
-      return { code:cell(row,map,'code'), name:cell(row,map,'name'), className:cell(row,map,'className'), ...studentFeesFromRow(row,map), updatedAt:now };
-    }).filter(s => s.code && s.name); }
+    try {
+      if(longFormat) items=studentsFromFeeRows(dataRows,map,now);
+      else {
+        const existing=new Map((await all('students')).map(s=>[slug(s.code),s]));
+        const seen=new Set();
+        items=dataRows.map((row,index)=>{
+          const code=cell(row,map,'code'),name=cell(row,map,'name'),className=cell(row,map,'className');
+          if(!code&&!name&&!className)return null;
+          if(!code||!name||!className)throw new Error(`Dòng dữ liệu ${index+2}: thiếu Mã MOET/mã học sinh, họ tên hoặc lớp.`);
+          const key=slug(code);if(seen.has(key))throw new Error(`Mã học sinh ${code} bị trùng trong danh sách.`);seen.add(key);
+          const old=existing.get(key)||{};
+          return {...old,code,name,className,personalId:cell(row,map,'personalId'),gender:cell(row,map,'gender'),birthDate:normalizeDate(cell(row,map,'birthDate')),ethnicity:cell(row,map,'ethnicity'),fatherName:cell(row,map,'fatherName'),motherName:cell(row,map,'motherName'),phone:cell(row,map,'phone'),due:num(old.due)||0,dueItems:Array.isArray(old.dueItems)?old.dueItems:[],dueByCategory:old.dueByCategory||{insurance:0,mandatory:0,service:0,other:0},hasFeeBreakdown:true,updatedAt:now};
+        }).filter(Boolean);
+      }
+    }
     catch(error) { return toast(error.message||'Danh sách học sinh chưa đúng định dạng.',true); }
     await putMany('students', items);
-    const codes = new Map((await all('students')).map(s => [slug(s.code), s]));
+    const currentStudents=await all('students');
+    const codes = new Map(currentStudents.map(s => [slug(s.code), s]));
+    const paymentOwners=new Map();currentStudents.forEach(s=>studentDueItems(s).forEach(item=>{if(item.paymentCode)paymentOwners.set(slug(item.paymentCode),s);}));
     const knownTransactions = await all('transactions');
     const rematched = knownTransactions.map(t => {
-      const student = t.reportedStudentCode ? codes.get(slug(t.reportedStudentCode)) : null;
+      const reported=t.reportedPaymentCode||t.reportedStudentCode||'';
+      const student = reported ? codes.get(slug(reported))||paymentOwners.get(slug(reported)) : null;
       return student ? { ...t, studentCode:student.code, studentName:student.name, matched:true } : { ...t, studentCode:'', studentName:'', matched:false };
     });
     await putMany('transactions', rematched);
