@@ -155,12 +155,29 @@
             <label class="qr-field"><span>Tên đơn vị</span><input id="receiptSchoolName" value="TRƯỜNG THCS SỐ 1 HIẾU GIANG" maxlength="120"></label>
             <label class="qr-field qr-field-wide"><span>Địa chỉ</span><input id="receiptSchoolAddress" maxlength="160" placeholder="Địa chỉ của trường"></label>
             <label class="qr-field"><span>Mã đơn vị / MST (nếu dùng)</span><input id="receiptUnitCode" maxlength="40" placeholder="Không bắt buộc"></label>
-            <label class="qr-field"><span>Tiền tố số chứng từ</span><input id="receiptPrefix" value="XN" maxlength="6" placeholder="XN"></label>
+            <label class="qr-field"><span>Tiền tố xác nhận chuyển khoản</span><input id="receiptTransferPrefix" value="XN" maxlength="6" placeholder="XN"></label>
+            <label class="qr-field"><span>Tiền tố phiếu thu tiền mặt</span><input id="receiptCashPrefix" value="PT" maxlength="6" placeholder="PT"></label>
             <label class="qr-field"><span>Người lập</span><input id="receiptPreparer" maxlength="80" placeholder="Họ và tên"></label>
+            <label class="qr-field"><span>Thủ quỹ</span><input id="receiptCashier" maxlength="80" placeholder="Họ và tên"></label>
             <label class="qr-field"><span>Kế toán / Phụ trách kế toán</span><input id="receiptAccountant" maxlength="80" placeholder="Họ và tên"></label>
             <label class="qr-field"><span>Thủ trưởng đơn vị</span><input id="receiptHead" maxlength="80" placeholder="Họ và tên"></label>
           </div>
           <div class="receipt-config-actions"><span>Không chèn ảnh chữ ký. Chứng từ chỉ hiển thị họ tên người ký khi đã cấu hình.</span><button class="button button-primary" id="saveReceiptConfig">Lưu cấu hình</button></div>
+        </article>
+
+        <article class="panel cash-entry-card">
+          <div class="panel-header"><div><h2>Ghi nhận thu tiền mặt</h2><p>Chọn đúng học sinh và món chưa thu. Khoản tiền mặt được lưu riêng và không bị mất khi cập nhật báo cáo ngân hàng.</p></div><span class="category-badge service">TIỀN MẶT</span></div>
+          <div class="cash-entry-grid">
+            <label class="qr-field"><span>Lớp</span><select id="cashClass"><option value="">— Chọn lớp —</option></select></label>
+            <label class="qr-field"><span>Học sinh</span><select id="cashStudent"><option value="">— Chọn học sinh —</option></select></label>
+            <label class="qr-field"><span>Khoản chưa thu</span><select id="cashFee"><option value="">— Chọn khoản thu —</option></select></label>
+            <label class="qr-field"><span>Ngày thu</span><input id="cashDate" type="date"></label>
+            <label class="qr-field"><span>Người nộp tiền</span><input id="cashPayer" maxlength="100" placeholder="Phụ huynh/người nộp"></label>
+            <label class="qr-field"><span>Số tiền</span><input id="cashAmount" readonly></label>
+            <label class="qr-field qr-field-wide"><span>Lý do / ghi chú</span><input id="cashNote" maxlength="180" placeholder="Ví dụ: Nộp Bảo hiểm thân thể cho học sinh"></label>
+          </div>
+          <div class="cash-entry-preview" id="cashEntryPreview">Chọn học sinh và khoản thu để ghi nhận tiền mặt.</div>
+          <div class="receipt-batch-actions"><span>Hiện tại chỉ ghi nhận đủ 100% số tiền của từng món để bảo đảm đối soát một-món/một-giao-dịch.</span><button class="button button-outline" id="recordCashPayment">Ghi nhận tiền mặt</button><button class="button button-primary" id="recordAndPrintCash">Ghi nhận & In phiếu thu</button></div>
         </article>
 
         <article class="panel receipt-filter-card">
@@ -170,6 +187,7 @@
             <label class="qr-field"><span>Lớp</span><select id="receiptClassFilter"><option value="all">Tất cả lớp</option></select></label>
             <label class="qr-field"><span>Học sinh</span><select id="receiptStudentFilter"><option value="all">Tất cả học sinh</option></select></label>
             <label class="qr-field"><span>Trạng thái</span><select id="receiptStatusFilter"><option value="all">Tất cả</option><option value="ready">Chưa phát hành</option><option value="issued">Đã phát hành</option><option value="cancelled">Đã hủy</option></select></label>
+            <label class="qr-field"><span>Hình thức thu</span><select id="receiptMethodFilter"><option value="all">Tất cả</option><option value="transfer">Chuyển khoản/QR</option><option value="cash">Tiền mặt</option></select></label>
             <label class="qr-field"><span>Từ ngày thu</span><input id="receiptDateFrom" type="date"></label>
             <label class="qr-field"><span>Đến ngày thu</span><input id="receiptDateTo" type="date"></label>
           </div>
