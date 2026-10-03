@@ -760,7 +760,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  renderQrPage(students,transactions,qrConfig);
+  await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -880,7 +880,15 @@ function wire() {
   $('#restoreFileInput').onchange=e=>{restore(e.target.files[0]);e.target.value='';};
   $('#modalClose').onclick=$('#modalCancel').onclick=closeModal;$('#modalConfirm').onclick=confirmImport;
   $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal();});
-  $('#studentSearch').addEventListener('input',async()=>renderStudents(await all('students'),await all('transactions')));
+  $('#studentSearch').addEventListener('input',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderStudents(students,reconcileTransactions(students,stored));});
+  $('#studentsTable').addEventListener('click',e=>{const btn=e.target.closest('[data-student-code]');if(btn)openStudentProfile(btn.dataset.studentCode);});
+  $('#studentProfileClose').onclick=closeStudentProfile;$('#studentProfileBackdrop').addEventListener('click',e=>{if(e.target.id==='studentProfileBackdrop')closeStudentProfile();});
+  $('#feeScope').addEventListener('change',async()=>populateFeeTargets(await all('students')));
+  $('#feeTargets').addEventListener('change',async()=>{const students=await all('students');const chosen=feeTargetStudents(students,$('#feeScope').value,selectedValues($('#feeTargets')));$('#feeTargetSummary').textContent=`${chosen.length} học sinh được chọn`;});
+  ['feePrefix','feeCode'].forEach(id=>$(`#${id}`).addEventListener('input',async()=>updateFeePreview(await all('students'))));
+  $('#saveFeeAssignment').onclick=()=>saveFeeAssignment().catch(e=>{console.error(e);toast(e.message||'Không tạo được khoản thu.',true);});
+  $('#newFeeButton').onclick=async()=>resetFeeForm(await all('students'));$('#cancelFeeEdit').onclick=async()=>resetFeeForm(await all('students'));
+  $('#feeCatalogList').addEventListener('click',e=>{const edit=e.target.closest('[data-fee-edit]'),del=e.target.closest('[data-fee-delete]');if(edit)editFee(edit.dataset.feeEdit);if(del)deleteFee(del.dataset.feeDelete);});
   $('#classFeeFilter').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderClasses(students,reconcileTransactions(students,stored));});
   $('#exportClassFeeReport').onclick=()=>exportClassFeeReport().catch(e=>{console.error(e);toast('Không xuất được báo cáo Excel.',true);});
   $('#classTable').addEventListener('click',e=>{const row=e.target.closest('.class-summary-row');if(row)openClassDetail(row.dataset.className);});
