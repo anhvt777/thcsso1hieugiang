@@ -136,7 +136,7 @@ async function parseXlsx(file) {
     let bestHeaderIndex=0,bestScore=-1;
     rows.slice(0,25).forEach((row,index)=>{
       const headers=(row||[]).map(x=>slug(x));
-      const score=headers.reduce((n,h)=>n+(headerWords.some(w=>h===w||h.includes(w)||w.includes(h))?1:0),0);
+      const score=headers.reduce((n,h)=>n+(h&&headerWords.some(w=>h===w||h.includes(w)||w.includes(h))?1:0),0);
       if(score>bestScore){bestScore=score;bestHeaderIndex=index;}
     });
     const dataRows=rows.slice(bestHeaderIndex+1).filter(row=>row.some(value=>String(value??'').trim())).length;
@@ -155,7 +155,10 @@ async function readRows(file) {
   const buffer = await file.arrayBuffer(); let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
   catch { text = new TextDecoder('windows-1258').decode(buffer); }
-  return parseCsv(text.replace(/^\uFEFF/, ''), bestDelimiter(text));
+  const parsed=parseCsv(text.replace(/^\uFEFF/, ''), bestDelimiter(text));
+  let best=0,bestScore=-1;
+  parsed.slice(0,25).forEach((row,index)=>{const hs=(row||[]).map(slug);let score=0;if(hs.some(h=>h&&['ho ten','ho va ten','ten hoc sinh'].some(x=>h===x||h.includes(x))))score+=4;if(hs.some(h=>h&&['lop','khoi lop'].some(x=>h===x||h.includes(x))))score+=3;if(hs.some(h=>h&&['ma moet','ma hoc sinh','ma hs','ma dinh danh'].some(x=>h===x||h.includes(x))))score+=4;if(score>bestScore){bestScore=score;best=index;}});
+  const normalized=bestScore>=5?parsed.slice(best):parsed;normalized.headerRow=(bestScore>=5?best:0)+1;return normalized;
 }
 function guessColumn(headers, field) {
   const normal = headers.map(h => slug(h));
@@ -241,11 +244,11 @@ function isSuccessfulBankStatus(value) {
 }
 function getFeeKey(value, content = '') {
   const raw = slug(value || '');
-  if (/bhtt|bao hiem bat buoc|bat buoc|mandatory/.test(raw)) return 'mandatory';
+  if (/bhtt|bao hiem than the|than the|bao hiem bat buoc|bat buoc|mandatory/.test(raw)) return 'mandatory';
   if (/bhyt|bao hiem y te|bao hiem|insurance|y te/.test(raw)) return 'insurance';
   if (/dich vu|gui xe|nuoc uong|ban tru|parking|service|an uong/.test(raw)) return 'service';
   const s = slug(content || '');
-  if (/bhtt|bao hiem bat buoc|bat buoc|mandatory/.test(s)) return 'mandatory';
+  if (/bhtt|bao hiem than the|than the|bao hiem bat buoc|bat buoc|mandatory/.test(s)) return 'mandatory';
   if (/bhyt|bao hiem y te|bao hiem|insurance|y te/.test(s)) return 'insurance';
   if (/dich vu|gui xe|nuoc uong|ban tru|parking|service|an uong/.test(s)) return 'service';
   return 'other';
@@ -703,6 +706,8 @@ async function saveFeeAssignment(){
   if(!name||!code||amount<=0)return toast('Hãy nhập tên khoản, mã khoản và số tiền hợp lệ.',true);
   if(scope!=='all'&&!targets.length)return toast('Hãy chọn ít nhất một đối tượng áp dụng.',true);
   const catalog=await getFeeCatalog();const duplicate=catalog.find(f=>f.id!==id&&feeSafeCode(f.code)===code);if(duplicate)return toast('Mã khoản đã tồn tại. Hãy dùng mã khác.',true);
+  const existingFee=catalog.find(f=>f.id===id);
+  if(existingFee){const stored=await all('transactions'),tx=reconcileTransactions(students,stored),assigned=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));if(tx.some(t=>t.paymentStatus==='valid'&&assigned.has(`${t.studentCode}|${t.matchedDueItemId}`)))return toast('Khoản này đã có giao dịch thu. Để bảo toàn đối soát, không thể sửa hoặc phân giao lại; hãy tạo khoản mới.',true);}
   const chosen=feeTargetStudents(students,scope,targets);if(!chosen.length)return toast('Không có học sinh nào trong phạm vi đã chọn.',true);
   const codes=new Set();for(const s of students)for(const item of studentDueItems(s))if(item.paymentCode)codes.add(slug(item.paymentCode));
   const chosenSet=new Set(chosen.map(s=>s.code));const now=new Date().toISOString();
@@ -864,10 +869,11 @@ async function exportClassFeeReport(){
 }
 
 function exportStudents() {
-  all('students').then(items=>{
-    const headers=['Mã học sinh','Họ và tên','Lớp','Số tiền phải thu','Mã khoản BHYT','BHYT phải thu','Mã khoản BHTT','BHTT phải thu','Dịch vụ khác phải thu','Gửi xe phải thu','Nước uống phải thu'];
-    const lines=items.map(s=>{const fees=studentDueItems(s);const amt=name=>fees.filter(x=>slug(x.name)===slug(name)).reduce((sum,x)=>sum+x.amount,0);const health=fees.find(x=>x.category==='insurance');const mandatory=fees.find(x=>x.category==='mandatory');const insurance=fees.filter(x=>x.category==='insurance').reduce((sum,x)=>sum+x.amount,0);const required=fees.filter(x=>x.category==='mandatory').reduce((sum,x)=>sum+x.amount,0);const service=fees.filter(x=>x.category==='service'&&!['gui xe','nuoc uong'].includes(slug(x.name))).reduce((sum,x)=>sum+x.amount,0);return [s.code,s.name,s.className,s.due,health?.paymentCode||'',insurance,mandatory?.paymentCode||'',required,service,amt('Gửi xe'),amt('Nước uống')].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');});
-    download('danh-sach-hoc-sinh.csv','\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
+  Promise.all([all('students'),all('transactions')]).then(([items,stored])=>{
+    const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId}`));
+    const headers=['Mã MOET','Họ và tên','Lớp','SĐD cá nhân','Giới tính','Ngày sinh','Dân tộc','Tên cha','Tên mẹ','Điện thoại','Số món phải thu','Tổng phải thu','Đã thu','Còn lại'];
+    const lines=items.map(s=>{const fees=studentDueItems(s),due=fees.reduce((a,x)=>a+x.amount,0),paidAmount=fees.filter(x=>paid.has(`${s.code}|${x.id}`)).reduce((a,x)=>a+x.amount,0);return [s.code,s.name,s.className,s.personalId||'',s.gender||'',s.birthDate||'',s.ethnicity||'',s.fatherName||'',s.motherName||'',s.phone||'',fees.length,due,paidAmount,Math.max(0,due-paidAmount)].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');});
+    download('danh-sach-hoc-sinh-hieu-giang.csv','\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
   });
 }
 function wire() {
