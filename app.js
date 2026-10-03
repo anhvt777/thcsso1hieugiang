@@ -10,6 +10,7 @@ const FEES = [
 let db;
 let activeImport = null;
 let toastTimer;
+let showIncompleteOnly=false;
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -528,14 +529,25 @@ function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
   const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
   const query = slug($('#studentSearch')?.value || '');
-  const filtered = students.filter(s => !query || slug(`${s.code} ${s.name} ${s.className} ${s.phone||''} ${s.personalId||''} ${s.fatherName||''} ${s.motherName||''}`).includes(query));
+  const filtered = students.filter(s => {
+    const warningCount=studentWarnings(s).length;
+    return (!showIncompleteOnly||warningCount>0)&&(!query || slug(`${s.code} ${s.name} ${s.className} ${s.phone||''} ${s.personalId||''} ${s.fatherName||''} ${s.motherName||''}`).includes(query));
+  });
+  const incomplete=students.filter(s=>studentWarnings(s).length>0);
   $('#studentCountLabel').textContent = `${students.length.toLocaleString('vi-VN')} học sinh`;
+  if($('#studentWarningPanel')){
+    $('#studentWarningPanel').hidden=!incomplete.length;
+    $('#studentWarningTitle').textContent=incomplete.length?`${incomplete.length} hồ sơ cần bổ sung / rà soát`:'';
+    $('#studentWarningText').textContent=incomplete.length?'Các hồ sơ này vẫn được lưu và vẫn có thể cập nhật lại từ file sau. Web không chặn toàn bộ danh sách vì dữ liệu thiếu.':'';
+    $('#showIncompleteStudents').textContent=showIncompleteOnly?'Xem tất cả học sinh':'Xem hồ sơ cần bổ sung';
+  }
   $('#studentsTable').innerHTML = filtered.length ? filtered.map(s => {
     const items=studentDueItems(s);const due=items.reduce((sum,x)=>sum+x.amount,0);
     const paid=items.filter(item=>paidByItem.has(`${s.code}|${item.id}`)).reduce((sum,x)=>sum+x.amount,0);
     const parent=[s.fatherName,s.motherName].filter(Boolean).join(' / ');
     const contact=[parent,s.phone].filter(Boolean).join(' · ');
-    return `<tr class="student-master-row" data-student-code="${escapeHTML(s.code)}"><td><strong>${escapeHTML(s.code)}</strong></td><td><strong>${escapeHTML(s.name)}</strong></td><td>${escapeHTML(s.className || '—')}</td><td>${escapeHTML(s.birthDate||'—')}</td><td class="student-contact-cell">${escapeHTML(contact||'—')}</td><td>${items.length}</td><td>${money(due)}</td><td>${money(paid)}</td><td class="remain-cell"><strong>${money(Math.max(0,due-paid))}</strong></td><td><button class="text-button student-detail-button" data-student-code="${escapeHTML(s.code)}">Chi tiết ›</button></td></tr>`;
+    const warnings=studentWarnings(s);const warn=warnings.length?`<span class="student-warning-badge" title="${escapeHTML(warnings.join(' · '))}">⚠ ${warnings.length}</span>`:'';
+    return `<tr class="student-master-row ${warnings.length?'has-warning':''}" data-student-code="${escapeHTML(s.code)}"><td><strong>${escapeHTML(s.code)}</strong> ${warn}</td><td><strong>${escapeHTML(s.name)}</strong></td><td>${escapeHTML(s.className || '—')}</td><td>${escapeHTML(s.birthDate||'—')}</td><td class="student-contact-cell">${escapeHTML(contact||'—')}</td><td>${items.length}</td><td>${money(due)}</td><td>${money(paid)}</td><td class="remain-cell"><strong>${money(Math.max(0,due-paid))}</strong></td><td><button class="text-button student-detail-button" data-student-code="${escapeHTML(s.code)}">Chi tiết ›</button></td></tr>`;
   }).join('') : `<tr><td colspan="10" class="empty-cell">${students.length ? 'Không tìm thấy học sinh phù hợp.' : 'Chưa có học sinh. Hãy tải file danh sách gốc của trường.'}</td></tr>`;
 }
 function renderClasses(students, transactions) {
@@ -928,6 +940,7 @@ function wire() {
   $('#modalClose').onclick=$('#modalCancel').onclick=closeModal;$('#modalConfirm').onclick=confirmImport;
   $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal();});
   $('#studentSearch').addEventListener('input',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderStudents(students,reconcileTransactions(students,stored));});
+  $('#showIncompleteStudents').onclick=async()=>{showIncompleteOnly=!showIncompleteOnly;const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderStudents(students,reconcileTransactions(students,stored));};
   $('#studentsTable').addEventListener('click',e=>{const btn=e.target.closest('[data-student-code]');if(btn)openStudentProfile(btn.dataset.studentCode);});
   $('#studentProfileClose').onclick=closeStudentProfile;$('#studentProfileBackdrop').addEventListener('click',e=>{if(e.target.id==='studentProfileBackdrop')closeStudentProfile();});
   $('#feeScope').addEventListener('change',async()=>populateFeeTargets(await all('students')));
