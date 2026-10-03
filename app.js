@@ -113,7 +113,7 @@ async function parseXlsx(file) {
   const sharedXml = await getText('xl/sharedStrings.xml');
   const sharedDoc = sharedXml ? new DOMParser().parseFromString(sharedXml, 'application/xml') : null;
   const shared = sharedDoc ? [...sharedDoc.querySelectorAll('si')].map(si => [...si.querySelectorAll('t')].map(t => t.textContent).join('')) : [];
-  const headerWords=['ma hoc sinh','ma hs theo khoan nop','ma khach hang','ho va ten','ten khach hang','khoan nop','so tien','so hoa don','ngay giao dich','trang thai giao dich'];
+  const headerWords=['ma hoc sinh','ma hs theo khoan nop','ma khach hang','ma moet','ho va ten','ho ten','ten khach hang','lop','khoan nop','so tien','so hoa don','ngay giao dich','trang thai giao dich','ngay thang nam sinh','di dong'];
   const candidates=[];
   for (const sheetNode of workbook.querySelectorAll('sheet')) {
     const relId=sheetNode.getAttribute('r:id');
@@ -133,15 +133,21 @@ async function parseXlsx(file) {
       }
       return cells.map(value=>value??'');
     });
-    const headers=(rows[0]||[]).map(x=>slug(x));
-    const score=headers.reduce((n,h)=>n+(headerWords.some(w=>h===w||h.includes(w))?1:0),0);
-    const dataRows=rows.slice(1).filter(row=>row.some(value=>String(value??'').trim())).length;
-    candidates.push({name:sheetNode.getAttribute('name')||'Trang tính',rows,score,dataRows});
+    let bestHeaderIndex=0,bestScore=-1;
+    rows.slice(0,25).forEach((row,index)=>{
+      const headers=(row||[]).map(x=>slug(x));
+      const score=headers.reduce((n,h)=>n+(headerWords.some(w=>h===w||h.includes(w)||w.includes(h))?1:0),0);
+      if(score>bestScore){bestScore=score;bestHeaderIndex=index;}
+    });
+    const dataRows=rows.slice(bestHeaderIndex+1).filter(row=>row.some(value=>String(value??'').trim())).length;
+    candidates.push({name:sheetNode.getAttribute('name')||'Trang tính',rows,score:bestScore,dataRows,headerIndex:bestHeaderIndex});
   }
   const chosen=candidates.sort((a,b)=>b.score-a.score||b.dataRows-a.dataRows)[0];
   if(!chosen)throw new Error('Không tìm thấy trang tính có dữ liệu trong file Excel.');
-  chosen.rows.sourceSheet=chosen.name;
-  return chosen.rows;
+  const normalizedRows=chosen.rows.slice(chosen.headerIndex||0);
+  normalizedRows.sourceSheet=chosen.name;
+  normalizedRows.headerRow=(chosen.headerIndex||0)+1;
+  return normalizedRows;
 }
 async function readRows(file) {
   const ext = file.name.split('.').pop().toLowerCase();
