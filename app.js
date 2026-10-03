@@ -882,17 +882,19 @@ async function exportClassFeeReport(){
   if(typeof JSZip==='undefined')return toast('Thiếu thư viện xuất Excel. Hãy tải lại trang.',true);
   const filter=$('#classFeeFilter')?.value||'all';
   if(filter==='all')return toast('Hãy chọn một món thu cụ thể trước khi xuất báo cáo.',true);
-  const [students,stored]=await Promise.all([all('students'),all('transactions')]);
+  const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);
   const transactions=reconcileTransactions(students,stored);
-  const label=filter==='mandatory'?'BH thân thể (BHTT)':filter==='insurance'?'Bảo hiểm y tế (BHYT)':'Dịch vụ khác';
+  const exactFee=filter.startsWith('catalog:')?catalog.find(f=>f.id===filter.slice(8)):null;
+  const label=exactFee?.name||(filter==='mandatory'?'Nhóm BH thân thể (BHTT)':filter==='insurance'?'Nhóm Bảo hiểm y tế (BHYT)':filter==='service'?'Nhóm Dịch vụ khác':'Nhóm khoản khác');
   const groups=[...new Set(students.map(s=>s.className||'Chưa xếp lớp'))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true,sensitivity:'base'}));
   const summary=[];const details=[];
   for(const className of groups){
     const classStudents=students.filter(s=>(s.className||'Chưa xếp lớp')===className);
     let dueItems=0,paidItems=0,due=0,paid=0;
     for(const student of classStudents){
-      const items=studentDueItems(student).filter(item=>item.category===filter);
-      const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&transactionCategory(t)===filter);
+      const items=studentDueItems(student).filter(item=>itemMatchesFeeFilter(item,filter));
+      const itemIds=new Set(items.map(item=>item.id));
+      const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&itemIds.has(t.matchedDueItemId||''));
       const paidKeys=new Set(valid.map(t=>t.matchedDueItemId||''));
       for(const item of items){
         const isPaid=paidKeys.has(item.id);
@@ -927,7 +929,7 @@ async function exportClassFeeReport(){
   const sheet2=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="11" customWidth="1"/><col min="2" max="2" width="17" customWidth="1"/><col min="3" max="3" width="28" customWidth="1"/><col min="4" max="4" width="25" customWidth="1"/><col min="5" max="8" width="16" customWidth="1"/><col min="9" max="9" width="13" customWidth="1"/><col min="10" max="10" width="22" customWidth="1"/></cols><sheetData>${detailRows.join('')}</sheetData><autoFilter ref="A3:J${details.length+3}"/><mergeCells count="1"><mergeCell ref="A1:J1"/></mergeCells></worksheet>`;
   zip.folder('xl').folder('worksheets').file('sheet2.xml',sheet2);
   const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  const safe=filter==='mandatory'?'BHTT':filter==='insurance'?'BHYT':'DICH-VU';
+  const safe=exactFee?feeSafeCode(exactFee.code||exactFee.name,20):(filter==='mandatory'?'BHTT':filter==='insurance'?'BHYT':filter==='service'?'DICH-VU':'KHAC');
   const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`Bao-cao-thu-${safe}-theo-lop.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
   toast(`Đã xuất báo cáo Excel ${label}.`);
 }
