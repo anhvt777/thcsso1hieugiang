@@ -3,7 +3,7 @@ const DB_NAME = 'so-thu-hoc-sinh-hieugiang-local';
 const DB_VERSION = 1;
 const FEES = [
   { key: 'insurance', label: 'Bảo hiểm y tế (BHYT)', short: 'BHYT' },
-  { key: 'mandatory', label: 'Bảo hiểm bắt buộc (BHTT)', short: 'BHTT' },
+  { key: 'mandatory', label: 'Bảo hiểm thân thể (BHTT)', short: 'BHTT' },
   { key: 'service', label: 'Dịch vụ khác', short: 'Dịch vụ' },
   { key: 'other', label: 'Chưa phân loại', short: 'Chưa rõ' }
 ];
@@ -554,7 +554,7 @@ function renderFeeDetails(students, transactions, summaries) {
   $('#feeCategoryCards').innerHTML=visible.length?visible.map(s=>{
     const feeTx=transactions.filter(t=>transactionCategory(t)===s.key);const detailNames=[...new Set(feeTx.filter(t=>s.key==='service').map(t=>t.feeDetail||serviceDetail('',t.content)))].filter(Boolean).slice(0,6);
     const cls=s.key==='service'?'service-card':'';
-    const description=s.key==='insurance'?'Bảo hiểm y tế theo mã khoản YT':s.key==='mandatory'?'Bảo hiểm bắt buộc theo mã khoản TT':'Gửi xe, nước uống và các dịch vụ khác';
+    const description=s.key==='insurance'?'Bảo hiểm y tế theo mã khoản YT':s.key==='mandatory'?'Bảo hiểm thân thể tự nguyện theo mã khoản TT':'Gửi xe, nước uống và các dịch vụ khác';
     return `<article class="panel fee-detail-card ${cls}"><div class="fee-detail-title"><div><h2>${s.label}</h2><p>${description}</p></div><span class="category-badge ${s.key==='service'?'service':''}">${s.dueItems} món</span></div><div class="fee-total">${money(s.due)}</div><div class="fee-card-progress"><i style="width:${s.pct}%"></i></div><div class="fee-card-foot">Đã ghi nhận ${money(s.paid)} · Còn ${money(s.remain)} · ${s.pct}% giá trị</div><div class="fee-breakdown"><div><span>Phải thu</span><strong>${s.dueItems} món</strong></div><div><span>Đã thu đủ</span><strong>${s.paidItems} món</strong></div><div><span>Giao dịch</span><strong>${feeTx.length}</strong></div></div>${detailNames.length?`<div class="service-breakdown">${detailNames.map(n=>`<span class="service-chip">${escapeHTML(n)}</span>`).join('')}</div>`:''}</article>`;
   }).join(''):'<div class="panel empty-state">Chưa có số liệu theo từng khoản thu. Nhập danh sách học sinh và báo cáo thu để bắt đầu.</div>';
   const serviceTx=transactions.filter(t=>transactionCategory(t)==='service');const breakdown=new Map();
