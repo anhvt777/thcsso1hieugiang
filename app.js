@@ -287,6 +287,21 @@ function studentFeesFromRow(row, map) {
   const dueByCategory=dueItems.reduce((out,item)=>(out[item.category]=(out[item.category]||0)+item.amount,out),{});
   return {due,dueItems,dueByCategory,hasFeeBreakdown:hasBreakdown};
 }
+function studentIdentity(s){
+  const name=slug(s?.name||''),birth=String(s?.birthDate||''),cls=slug(s?.className||''),phone=String(s?.phone||'').replace(/\D/g,''),pid=String(s?.personalId||'').replace(/\s/g,'');
+  if(!name&&!birth&&!phone&&!pid)return '';
+  return [name,birth,cls,phone,pid].join('|');
+}
+function tempStudentCode(s,index=0){
+  const raw=studentIdentity(s)||`row|${index}`;let h=2166136261;
+  for(let i=0;i<raw.length;i++){h^=raw.charCodeAt(i);h=Math.imul(h,16777619);}
+  return `TMP-${(h>>>0).toString(36).toUpperCase()}`;
+}
+function studentWarnings(s,conflicts=[]){
+  const out=[];if(String(s.code||'').startsWith('TMP-'))out.push('Thiếu Mã MOET');if(!s.name||/^Chưa cập nhật/.test(s.name))out.push('Thiếu họ tên');if(!s.className||s.className==='Chưa xếp lớp')out.push('Thiếu lớp');
+  if(conflicts.length)out.push('Thông tin trùng/chưa thống nhất');
+  return [...new Set([...(s.dataWarnings||[]),...out])];
+}
 function studentsFromFeeRows(dataRows,map,now) {
   const grouped=new Map(),paymentOwners=new Map();
   for(let i=0;i<dataRows.length;i++) {
@@ -326,16 +341,41 @@ async function confirmImport() {
     try {
       if(longFormat) items=studentsFromFeeRows(dataRows,map,now);
       else {
-        const existing=new Map((await all('students')).map(s=>[slug(s.code),s]));
-        const seen=new Set();
-        items=dataRows.map((row,index)=>{
-          const code=cell(row,map,'code'),name=cell(row,map,'name'),className=cell(row,map,'className');
-          if(!code&&!name&&!className)return null;
-          if(!code||!name||!className)throw new Error(`Dòng dữ liệu ${index+2}: thiếu Mã MOET/mã học sinh, họ tên hoặc lớp.`);
-          const key=slug(code);if(seen.has(key))throw new Error(`Mã học sinh ${code} bị trùng trong danh sách.`);seen.add(key);
-          const old=existing.get(key)||{};
-          return {...old,code,name,className,personalId:cell(row,map,'personalId'),gender:cell(row,map,'gender'),birthDate:normalizeDate(cell(row,map,'birthDate')),ethnicity:cell(row,map,'ethnicity'),fatherName:cell(row,map,'fatherName'),motherName:cell(row,map,'motherName'),phone:cell(row,map,'phone'),due:num(old.due)||0,dueItems:Array.isArray(old.dueItems)?old.dueItems:[],dueByCategory:old.dueByCategory||{insurance:0,mandatory:0,service:0,other:0},hasFeeBreakdown:true,updatedAt:now};
-        }).filter(Boolean);
+        const existingList=await all('students');
+        const existing=new Map(existingList.map(s=>[slug(s.code),s]));
+        const byIdentity=new Map(existingList.map(s=>[studentIdentity(s),s]).filter(([k])=>k));
+        const merged=new Map(),warnings=[];const tempToDelete=new Set();
+        dataRows.forEach((row,index)=>{
+          let code=cell(row,map,'code'),name=cell(row,map,'name'),className=cell(row,map,'className');
+          const profile={personalId:cell(row,map,'personalId'),gender:cell(row,map,'gender'),birthDate:normalizeDate(cell(row,map,'birthDate')),ethnicity:cell(row,map,'ethnicity'),fatherName:cell(row,map,'fatherName'),motherName:cell(row,map,'motherName'),phone:cell(row,map,'phone')};
+          if(!code&&!name&&!className&&!Object.values(profile).some(Boolean))return;
+          const identity=studentIdentity({name,className,birthDate:profile.birthDate,phone:profile.phone,personalId:profile.personalId});
+          let old=code?existing.get(slug(code)):null;
+          if(!old&&identity)old=byIdentity.get(identity)||null;
+          if(!code&&old?.code)code=old.code;
+          if(!code){
+            code=tempStudentCode({name,className,birthDate:profile.birthDate,phone:profile.phone,personalId:profile.personalId},index);
+            warnings.push(`Dòng ${index+2}: thiếu Mã MOET, đã tạo mã tạm ${code}.`);
+          }
+          const missing=[];if(!name)missing.push('họ tên');if(!className)missing.push('lớp');if(String(code).startsWith('TMP-'))missing.push('Mã MOET');
+          if(!name)name=old?.name||'Chưa cập nhật họ tên';
+          if(!className)className=old?.className||'Chưa xếp lớp';
+          if(old&&old.code!==code&&String(old.code).startsWith('TMP-'))tempToDelete.add(old.code);
+          const key=slug(code),prior=merged.get(key)||old||{};
+          const conflicts=[];
+          if(prior.name&&name&&prior.name!==name&&!/^Chưa cập nhật/.test(prior.name))conflicts.push(`họ tên: “${prior.name}” / “${name}”`);
+          if(prior.className&&className&&prior.className!==className&&prior.className!=='Chưa xếp lớp')conflicts.push(`lớp: “${prior.className}” / “${className}”`);
+          if(merged.has(key))warnings.push(`Dòng ${index+2}: trùng mã ${code}, web đã gộp dữ liệu.`);
+          if(conflicts.length)warnings.push(`Mã ${code}: thông tin chưa thống nhất (${conflicts.join('; ')}).`);
+          if(missing.length)warnings.push(`Dòng ${index+2}: còn thiếu ${missing.join(', ')}; vẫn được nhập để bổ sung sau.`);
+          const choose=(fresh,oldValue)=>fresh||oldValue||'';
+          const next={...prior,code,name:choose(name,prior.name),className:choose(className,prior.className),personalId:choose(profile.personalId,prior.personalId),gender:choose(profile.gender,prior.gender),birthDate:choose(profile.birthDate,prior.birthDate),ethnicity:choose(profile.ethnicity,prior.ethnicity),fatherName:choose(profile.fatherName,prior.fatherName),motherName:choose(profile.motherName,prior.motherName),phone:choose(profile.phone,prior.phone),due:num(prior.due)||0,dueItems:Array.isArray(prior.dueItems)?prior.dueItems:[],dueByCategory:prior.dueByCategory||{insurance:0,mandatory:0,service:0,other:0},hasFeeBreakdown:true,updatedAt:now};
+          next.dataWarnings=studentWarnings(next,conflicts);
+          merged.set(key,next);
+        });
+        for(const oldCode of tempToDelete)await request('students','delete',oldCode);
+        items=[...merged.values()];
+        activeImport.warnings=warnings;
       }
     }
     catch(error) { return toast(error.message||'Danh sách học sinh chưa đúng định dạng.',true); }
@@ -351,7 +391,8 @@ async function confirmImport() {
     });
     await putMany('transactions', rematched);
     const feeItems=items.reduce((sum,s)=>sum+studentDueItems(s).length,0);
-    summary = { rows:dataRows.length, imported:items.length, detail:`${items.length.toLocaleString('vi-VN')} học sinh · ${feeItems.toLocaleString('vi-VN')} món phải thu được nhập/cập nhật` };
+    const warningCount=(activeImport.warnings||[]).length;
+    summary = { rows:dataRows.length, imported:items.length, detail:`${items.length.toLocaleString('vi-VN')} học sinh được nhập/cập nhật${warningCount?` · ${warningCount} cảnh báo cần rà soát`:''}`, warnings:activeImport.warnings||[] };
     $('#studentLastImport').textContent = `Gần nhất: ${file.name} · ${items.length.toLocaleString('vi-VN')} học sinh`;
   } else {
     const students = await all('students'); const byCode = new Map(students.map(s => [slug(s.code), s]));
