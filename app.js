@@ -550,6 +550,17 @@ function renderStudents(students, transactions) {
     return `<tr class="student-master-row ${warnings.length?'has-warning':''}" data-student-code="${escapeHTML(s.code)}"><td><strong>${escapeHTML(s.code)}</strong> ${warn}</td><td><strong>${escapeHTML(s.name)}</strong></td><td>${escapeHTML(s.className || '—')}</td><td>${escapeHTML(s.birthDate||'—')}</td><td class="student-contact-cell">${escapeHTML(contact||'—')}</td><td>${items.length}</td><td>${money(due)}</td><td>${money(paid)}</td><td class="remain-cell"><strong>${money(Math.max(0,due-paid))}</strong></td><td><button class="text-button student-detail-button" data-student-code="${escapeHTML(s.code)}">Chi tiết ›</button></td></tr>`;
   }).join('') : `<tr><td colspan="10" class="empty-cell">${students.length ? 'Không tìm thấy học sinh phù hợp.' : 'Chưa có học sinh. Hãy tải file danh sách gốc của trường.'}</td></tr>`;
 }
+function itemMatchesFeeFilter(item,filter){
+  if(filter==='all')return true;
+  if(filter.startsWith('catalog:'))return item.catalogId===filter.slice(8);
+  return item.category===filter;
+}
+async function populateFeeReportFilters(catalog){
+  const select=$('#classFeeFilter');if(!select)return;const current=select.value||'all';
+  const categoryOptions=[['all','Tất cả khoản thu'],['mandatory','Nhóm BHTT'],['insurance','Nhóm BHYT'],['service','Nhóm dịch vụ'],['other','Nhóm khác']];
+  select.innerHTML=categoryOptions.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')+(catalog.length?'<optgroup label="Từng khoản đã tạo">'+catalog.sort((a,b)=>a.name.localeCompare(b.name,'vi')).map(f=>`<option value="catalog:${f.id}">${escapeHTML(f.name)} · ${money(f.amount)}</option>`).join('')+'</optgroup>':'');
+  if([...select.options].some(o=>o.value===current))select.value=current;
+}
 function renderClasses(students, transactions) {
   const filter=$('#classFeeFilter')?.value||'all';
   const groups = new Map();
@@ -562,10 +573,10 @@ function renderClasses(students, transactions) {
     let m;
     if(filter==='all') m=totals(g.students,classTransactions);
     else {
-      const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>item.category===filter));
+      const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
-      const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>item.category===filter).map(item=>`${s.code}|${item.id}`)));
-      const valid=classTransactions.filter(t=>t.paymentStatus==='valid'&&transactionCategory(t)===filter&&dueKeys.has(`${t.studentCode}|${t.matchedDueItemId||''}`));
+      const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
+      const valid=classTransactions.filter(t=>t.paymentStatus==='valid'&&dueKeys.has(`${t.studentCode}|${t.matchedDueItemId||''}`));
       const paidItems=new Set(valid.map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`)).size;
       const paid=valid.reduce((sum,t)=>sum+num(t.amount),0);
       m={dueItems:dueItems.length,paidItems,due,paid,remain:Math.max(0,due-paid)};
@@ -818,7 +829,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);
+  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
