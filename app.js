@@ -160,9 +160,16 @@ async function readRows(file) {
 function guessColumn(headers, field) {
   const normal = headers.map(h => slug(h));
   const patterns = {
-    code: ['ma hoc sinh', 'ma hs', 'student code', 'student id', 'ma dinh danh', 'ma so hs'],
-    name: ['ho va ten', 'ten hoc sinh', 'ho ten', 'student name', 'ten'],
-    className: ['lop', 'khoi lop', 'class', 'ma lop'],
+    code: ['ma moet','ma hoc sinh','ma hs','student code','student id','ma dinh danh','ma so hs'],
+    name: ['ho va ten','ho ten','ten hoc sinh','student name','ten'],
+    className: ['lop','khoi lop','class','ma lop'],
+    personalId: ['sdd ca nhan','so dinh danh ca nhan','cccd','cmnd','ma dinh danh ca nhan'],
+    gender: ['gioi tinh','gender'],
+    birthDate: ['ngay thang nam sinh','ngay sinh','nam sinh','date of birth'],
+    ethnicity: ['dan toc','ethnicity'],
+    fatherName: ['ten cha','ho ten cha','cha'],
+    motherName: ['ten me','ho ten me','me'],
+    phone: ['di dong','dien thoai','so dien thoai','sdt','phone'],
     due: ['so tien phai thu', 'phai thu', 'hoc phi', 'muc thu', 'tien thu'],
     dueInsurance: ['bhyt', 'bao hiem y te', 'so tien bao hiem y te', 'bao hiem y te phai thu', 'insurance'],
     dueMandatory: ['bhtt', 'bao hiem bat buoc', 'bat buoc'],
@@ -202,7 +209,7 @@ function openImportModal(kind, file, rows) {
   const fields = kind === 'students'
     ? longFormat
       ? `<div class="mapping-grid">${fieldSelect('map-code','Mã học sinh',headers,'code',true)}${fieldSelect('map-payment-code','Mã HS theo khoản nộp',headers,'paymentCode',true)}${fieldSelect('map-name','Họ và tên',headers,'name',true)}${fieldSelect('map-class','Lớp',headers,'className',true)}${fieldSelect('map-fee-category','Khoản nộp (BHYT/BHTT)',headers,'studentFeeCategory',true)}${fieldSelect('map-fee-amount','Số tiền phải thu',headers,'studentFeeAmount',true)}</div><p class="mapping-intro">Mỗi học sinh có một dòng BHYT và một dòng BHTT. Web tự ghép hai dòng theo mã học sinh và giữ mã từng khoản để đối soát với cột “Mã khách hàng” của ngân hàng.</p>`
-      : `<div class="mapping-grid">${fieldSelect('map-code','Mã học sinh',headers,'code',true)}${fieldSelect('map-name','Họ và tên',headers,'name',true)}${fieldSelect('map-class','Lớp',headers,'className')}${fieldSelect('map-due','Tổng phải thu (nếu có)',headers,'due')}${fieldSelect('map-insurance','Phải thu · BHYT',headers,'dueInsurance')}${fieldSelect('map-mandatory','Phải thu · BHTT',headers,'dueMandatory')}${fieldSelect('map-service','Phải thu · Dịch vụ khác',headers,'dueService')}${fieldSelect('map-parking','Phải thu · Gửi xe',headers,'dueParking')}${fieldSelect('map-water','Phải thu · Nước uống',headers,'dueWater')}</div><p class="mapping-intro">Nhập riêng số phải thu BHYT và BHTT. Web chỉ tính khoản đã thu khi số tiền khớp chính xác.</p>`
+      : `<div class="mapping-grid">${fieldSelect('map-code','Mã MOET / Mã học sinh',headers,'code',true)}${fieldSelect('map-name','Họ và tên',headers,'name',true)}${fieldSelect('map-class','Lớp',headers,'className',true)}${fieldSelect('map-personal-id','SĐD cá nhân',headers,'personalId')}${fieldSelect('map-gender','Giới tính',headers,'gender')}${fieldSelect('map-birth-date','Ngày sinh',headers,'birthDate')}${fieldSelect('map-ethnicity','Dân tộc',headers,'ethnicity')}${fieldSelect('map-father-name','Tên cha',headers,'fatherName')}${fieldSelect('map-mother-name','Tên mẹ',headers,'motherName')}${fieldSelect('map-phone','Điện thoại',headers,'phone')}</div><p class="mapping-intro">Web ưu tiên Mã MOET làm mã học sinh và lưu thêm thông tin hồ sơ. Các khoản thu sẽ được tạo, phân giao sau trên web nên file danh sách không cần có cột số tiền.</p>`
     : `<div class="mapping-grid">${fieldSelect('map-amount','Số tiền giao dịch',headers,'amount',true)}${fieldSelect('map-student','Mã khách hàng / mã khoản nộp',headers,'studentCode')}${fieldSelect('map-txn','Số hóa đơn / mã giao dịch',headers,'txnId')}${fieldSelect('map-date','Ngày giao dịch',headers,'date')}${fieldSelect('map-content','Tên khách hàng / nội dung',headers,'content')}${fieldSelect('map-category','Khoản thu (nếu có)',headers,'feeCategory')}${fieldSelect('map-bank-status','Trạng thái giao dịch',headers,'bankStatus')}</div><p class="mapping-intro">Mã khách hàng kết thúc bằng YT hoặc TT sẽ được ghép với đúng khoản BHYT hoặc BHTT. Chỉ giao dịch thành công, đúng mã khoản và đúng số tiền mới được tính đã thu.</p>`;
   $('#modalBody').innerHTML = `${summary}${fields}${previewHtml(headers, rows)}`;
   $('#modalConfirm').textContent = kind === 'students' ? 'Nhập danh sách' : 'Nhập & đối soát';
