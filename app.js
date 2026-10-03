@@ -419,10 +419,12 @@ async function confirmImport() {
       if(uniqueById.has(t.id)) duplicates++;
       uniqueById.set(t.id,t);
     }
-    const snapshot=[...uniqueById.values()];
+    const bankSnapshot=[...uniqueById.values()];
+    const manualCash=(await all('transactions')).filter(t=>t.sourceType==='cash');
+    const snapshot=[...bankSnapshot,...manualCash];
     await request('transactions','clear');
     await putMany('transactions',snapshot);
-    summary = { rows:dataRows.length, imported:snapshot.length, detail:`${snapshot.length} giao dịch được đồng bộ theo báo cáo mới nhất${duplicates ? ` · ${duplicates} dòng trùng trong file được gộp` : ''}` };
+    summary = { rows:dataRows.length, imported:bankSnapshot.length, detail:`${bankSnapshot.length} giao dịch ngân hàng được đồng bộ${manualCash.length?` · giữ nguyên ${manualCash.length} giao dịch tiền mặt`:''}${duplicates ? ` · ${duplicates} dòng trùng trong file được gộp` : ''}` };
     $('#bankLastImport').textContent = `Gần nhất: ${file.name} · ${snapshot.length.toLocaleString('vi-VN')} giao dịch`;
   }
   await request('history', 'put', { id:crypto.randomUUID(), kind:kind === 'students' ? 'Danh sách học sinh' : 'Báo cáo thu', fileName:file.name, rows:summary.rows, imported:summary.imported, detail:summary.detail, at:now });
@@ -816,7 +818,7 @@ async function openStudentProfile(code){
 function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('open');}
 
 function receiptConfigDefaults(){
-  return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',prefix:'XN',preparer:'',accountant:'',head:''};
+  return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',transferPrefix:'XN',cashPrefix:'PT',preparer:'',cashier:'',accountant:'',head:''};
 }
 async function getReceiptConfig(){return {...receiptConfigDefaults(),...((await request('meta','get','receiptConfig'))||{})};}
 function receiptPaymentKey(student,item,txn){return `${student.code}|${item.id}|${txn.id}`;}
@@ -853,18 +855,20 @@ function receiptAmountWords(n){
   const s=parts.join(' ').replace(/\s+/g,' ').trim();return s.charAt(0).toLocaleUpperCase('vi-VN')+s.slice(1)+' đồng';
 }
 async function saveReceiptConfig(){
-  const config={key:'receiptConfig',parentUnit:$('#receiptParentUnit').value.trim(),schoolName:$('#receiptSchoolName').value.trim(),schoolAddress:$('#receiptSchoolAddress').value.trim(),unitCode:$('#receiptUnitCode').value.trim(),prefix:feeSafeCode($('#receiptPrefix').value||'XN',6)||'XN',preparer:$('#receiptPreparer').value.trim(),accountant:$('#receiptAccountant').value.trim(),head:$('#receiptHead').value.trim()};
+  const config={key:'receiptConfig',parentUnit:$('#receiptParentUnit').value.trim(),schoolName:$('#receiptSchoolName').value.trim(),schoolAddress:$('#receiptSchoolAddress').value.trim(),unitCode:$('#receiptUnitCode').value.trim(),transferPrefix:feeSafeCode($('#receiptTransferPrefix').value||'XN',6)||'XN',cashPrefix:feeSafeCode($('#receiptCashPrefix').value||'PT',6)||'PT',preparer:$('#receiptPreparer').value.trim(),cashier:$('#receiptCashier').value.trim(),accountant:$('#receiptAccountant').value.trim(),head:$('#receiptHead').value.trim()};
   if(!config.schoolName)return toast('Hãy nhập tên đơn vị trên chứng từ.',true);
-  await request('meta','put',config);$('#receiptPrefix').value=config.prefix;toast('Đã lưu thông tin chứng từ trên thiết bị này.');
+  await request('meta','put',config);$('#receiptTransferPrefix').value=config.transferPrefix;$('#receiptCashPrefix').value=config.cashPrefix;toast('Đã lưu thông tin chứng từ trên thiết bị này.');
 }
 function fillReceiptConfig(config){
-  const map={receiptParentUnit:'parentUnit',receiptSchoolName:'schoolName',receiptSchoolAddress:'schoolAddress',receiptUnitCode:'unitCode',receiptPrefix:'prefix',receiptPreparer:'preparer',receiptAccountant:'accountant',receiptHead:'head'};
+  const map={receiptParentUnit:'parentUnit',receiptSchoolName:'schoolName',receiptSchoolAddress:'schoolAddress',receiptUnitCode:'unitCode',receiptTransferPrefix:'transferPrefix',receiptCashPrefix:'cashPrefix',receiptPreparer:'preparer',receiptCashier:'cashier',receiptAccountant:'accountant',receiptHead:'head'};
   Object.entries(map).forEach(([id,key])=>{const el=$('#'+id);if(el)el.value=config[key]||'';});
 }
-async function nextReceiptNumbers(count,config){
-  const year=new Date().getFullYear(),key=`receiptSeq:${year}`,seq=await request('meta','get',key);let current=num(seq?.value);
-  const out=[];for(let i=0;i<count;i++){current++;out.push({year,seq:current,number:`${config.prefix||'XN'}-${year}-${String(current).padStart(6,'0')}`});}
-  await request('meta','put',{key,value:current});return out;
+async function nextReceiptNumber(method,config){
+  const year=new Date().getFullYear();
+  const prefix=method==='cash'?(config.cashPrefix||'PT'):(config.transferPrefix||config.prefix||'XN');
+  const key=`receiptSeq:${year}:${prefix}`,seq=await request('meta','get',key);const current=num(seq?.value)+1;
+  await request('meta','put',{key,value:current});
+  return {year,seq:current,number:`${prefix}-${year}-${String(current).padStart(6,'0')}`};
 }
 function receiptVerificationCode(number,id){return `RCT-${String(number).replace(/[^A-Z0-9]/gi,'').slice(-10).toUpperCase()}-${String(id).slice(0,6).toUpperCase()}`;}
 async function issueReceiptCandidates(candidates,{print=true}={}){
@@ -872,11 +876,11 @@ async function issueReceiptCandidates(candidates,{print=true}={}){
   const [receipts,config]=await Promise.all([all('receipts'),getReceiptConfig()]);
   const issuable=candidates.filter(x=>!receipts.some(r=>r.paymentKey===x.paymentKey&&r.status==='issued'));
   if(!issuable.length){if(print)printReceiptRecords(receipts.filter(r=>r.status==='issued'&&candidates.some(x=>x.paymentKey===r.paymentKey)),config);return toast('Các món đã chọn đều đã có chứng từ.');}
-  const nums=await nextReceiptNumbers(issuable.length,config),now=new Date().toISOString();
-  const records=issuable.map((x,i)=>{
-    const id=crypto.randomUUID(),n=nums[i];
-    return {id,paymentKey:x.paymentKey,number:n.number,sequence:n.seq,year:n.year,status:'issued',issuedAt:now,receiptType:'payment_confirmation',paymentMethod:'Chuyển khoản/QR',verificationCode:receiptVerificationCode(n.number,id),studentCode:x.student.code,studentName:x.student.name,className:x.student.className||'',feeName:x.item.name,feeCode:x.item.feeCode||x.item.category||'',paymentCode:x.item.paymentCode||'',amount:x.item.amount,paymentDate:x.txn.date||'',transactionRef:x.txn.ref||x.txn.id,transactionId:x.txn.id,content:x.txn.content||'',snapshot:{parentUnit:config.parentUnit,schoolName:config.schoolName,schoolAddress:config.schoolAddress,unitCode:config.unitCode,preparer:config.preparer,accountant:config.accountant,head:config.head}};
-  });
+  const now=new Date().toISOString(),records=[];
+  for(const x of issuable){
+    const method=x.txn.paymentChannel==='cash'?'cash':'transfer',n=await nextReceiptNumber(method,config),id=crypto.randomUUID();
+    records.push({id,paymentKey:x.paymentKey,number:n.number,sequence:n.seq,year:n.year,status:'issued',issuedAt:now,receiptType:method==='cash'?'cash_receipt':'payment_confirmation',paymentMethod:method==='cash'?'Tiền mặt':'Chuyển khoản/QR',verificationCode:receiptVerificationCode(n.number,id),studentCode:x.student.code,studentName:x.student.name,className:x.student.className||'',feeName:x.item.name,feeCode:x.item.feeCode||x.item.category||'',paymentCode:x.item.paymentCode||'',amount:x.item.amount,paymentDate:x.txn.date||'',transactionRef:x.txn.ref||x.txn.id,transactionId:x.txn.id,content:x.txn.content||'',payerName:x.txn.payerName||'',snapshot:{parentUnit:config.parentUnit,schoolName:config.schoolName,schoolAddress:config.schoolAddress,unitCode:config.unitCode,preparer:config.preparer,cashier:config.cashier,accountant:config.accountant,head:config.head}});
+  }
   await putMany('receipts',records);await request('history','put',{id:crypto.randomUUID(),kind:'Phát hành chứng từ',fileName:records.length===1?records[0].number:`${records.length} chứng từ`,rows:records.length,imported:records.length,detail:`Đã cấp ${records.length} chứng từ thanh toán`,at:now});
   await refresh();toast(`Đã phát hành ${records.length} chứng từ.`);
   if(print)printReceiptRecords(records,config);
