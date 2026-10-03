@@ -826,6 +826,50 @@ async function openStudentProfile(code){
 }
 function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('open');}
 
+function unpaidCashCandidates(students,transactions){
+  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  return students.flatMap(student=>studentDueItems(student).filter(item=>item.amount>0&&!paid.has(`${student.code}|${item.id}`)).map(item=>({student,item})));
+}
+function renderCashEntry(students,transactions){
+  const candidates=unpaidCashCandidates(students,transactions),classEl=$('#cashClass'),studentEl=$('#cashStudent'),feeEl=$('#cashFee');if(!classEl)return;
+  const currentClass=classEl.value,currentStudent=studentEl.value,currentFee=feeEl.value;
+  const classes=[...new Set(candidates.map(x=>x.student.className).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
+  classEl.innerHTML='<option value="">— Chọn lớp —</option>'+classes.map(v=>`<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join('');
+  if(classes.includes(currentClass))classEl.value=currentClass;
+  const studentsInClass=[...new Map(candidates.filter(x=>!classEl.value||x.student.className===classEl.value).map(x=>[x.student.code,x.student])).values()].sort((a,b)=>a.name.localeCompare(b.name,'vi'));
+  studentEl.innerHTML='<option value="">— Chọn học sinh —</option>'+studentsInClass.map(s=>`<option value="${escapeHTML(s.code)}">${escapeHTML(s.name)} · ${escapeHTML(s.code)}</option>`).join('');
+  if(studentsInClass.some(s=>s.code===currentStudent))studentEl.value=currentStudent;
+  const feeCandidates=candidates.filter(x=>(!classEl.value||x.student.className===classEl.value)&&(!studentEl.value||x.student.code===studentEl.value));
+  feeEl.innerHTML='<option value="">— Chọn khoản thu —</option>'+feeCandidates.map(x=>`<option value="${escapeHTML(x.item.id)}" data-student-code="${escapeHTML(x.student.code)}">${escapeHTML(x.item.name)} · ${money(x.item.amount)}</option>`).join('');
+  if([...feeEl.options].some(o=>o.value===currentFee))feeEl.value=currentFee;
+  if(!$('#cashDate').value)$('#cashDate').value=new Date().toISOString().slice(0,10);
+  updateCashPreview(students,transactions);
+}
+function updateCashPreview(students,transactions){
+  const code=$('#cashStudent')?.value||'',itemId=$('#cashFee')?.value||'',student=students.find(s=>s.code===code),item=student?studentDueItems(student).find(x=>x.id===itemId):null;
+  if(!student||!item){$('#cashAmount').value='';$('#cashEntryPreview').textContent='Chọn học sinh và khoản thu để ghi nhận tiền mặt.';return;}
+  $('#cashAmount').value=money(item.amount);
+  $('#cashEntryPreview').innerHTML=`<strong>${escapeHTML(student.name)} · ${escapeHTML(student.className||'')}</strong><span>${escapeHTML(item.name)} · ${money(item.amount)}</span><small>Mã thanh toán: ${escapeHTML(item.paymentCode||'—')}</small>`;
+}
+async function refreshCashEntry(){
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderCashEntry(students,reconcileTransactions(students,stored));
+}
+async function recordCashPayment(printAfter=false){
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]);const txs=reconcileTransactions(students,stored);
+  const student=students.find(s=>s.code===$('#cashStudent').value),item=studentDueItems(student||{}).find(x=>x.id===$('#cashFee').value);
+  if(!student||!item)return toast('Hãy chọn đúng học sinh và khoản chưa thu.',true);
+  if(txs.some(t=>t.paymentStatus==='valid'&&t.studentCode===student.code&&t.matchedDueItemId===item.id))return toast('Khoản này đã được ghi nhận đã thu.',true);
+  const date=$('#cashDate').value||new Date().toISOString().slice(0,10),payer=$('#cashPayer').value.trim(),note=$('#cashNote').value.trim();
+  if(!payer)return toast('Hãy nhập người nộp tiền.',true);
+  const id=`cash:${crypto.randomUUID()}`,cashTx={id,ref:`TM-${date.replace(/-/g,'')}-${String(Date.now()).slice(-6)}`,date,content:note||`Thu tiền mặt ${item.name}`,amount:item.amount,feeCategory:item.category,feeDetail:item.name,reportedStudentCode:student.code,reportedPaymentCode:item.paymentCode||student.code,bankStatus:'thanh cong',studentCode:student.code,studentName:student.name,sourceFile:'Ghi nhận thủ công',importedAt:new Date().toISOString(),matched:true,sourceType:'cash',paymentChannel:'cash',manualDueItemId:item.id,payerName:payer};
+  await request('transactions','put',cashTx);
+  await request('history','put',{id:crypto.randomUUID(),kind:'Thu tiền mặt',fileName:cashTx.ref,rows:1,imported:1,detail:`${student.name} · ${item.name} · ${money(item.amount)}`,at:cashTx.importedAt});
+  const reconciled=reconcileTransactions(students,[...stored,cashTx]),valid=reconciled.find(t=>t.id===id&&t.paymentStatus==='valid');
+  if(!valid)throw new Error('Không thể xác nhận giao dịch tiền mặt với món thu đã chọn.');
+  $('#cashPayer').value='';$('#cashNote').value='';
+  if(printAfter)await issueReceiptCandidates([{paymentKey:receiptPaymentKey(student,item,valid),student,item,txn:valid}],{print:true});else{await refresh();toast('Đã ghi nhận khoản thu tiền mặt.');}
+}
+
 function receiptConfigDefaults(){
   return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',transferPrefix:'XN',cashPrefix:'PT',preparer:'',cashier:'',accountant:'',head:''};
 }
