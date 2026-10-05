@@ -491,6 +491,42 @@ function studentDueItems(student) {
 function studentDueByCategory(student) {
   return studentDueItems(student).reduce((out,item)=>(out[item.category]=(out[item.category]||0)+item.amount,out),{insurance:0,mandatory:0,service:0,other:0});
 }
+let noticeBundleCache=new Map();
+function setNoticeBundleCache(record){
+  const items=Array.isArray(record?.items)?record.items:[];
+  noticeBundleCache=new Map(items.map(x=>[slug(x.remark),x]).filter(([k])=>k));
+}
+function transactionMatchedItemIds(t){
+  const ids=Array.isArray(t?.matchedDueItemIds)?t.matchedDueItemIds.filter(Boolean):[];
+  if(t?.matchedDueItemId&&!ids.includes(t.matchedDueItemId))ids.push(t.matchedDueItemId);
+  return ids;
+}
+function transactionMatchesItem(t,itemId){return transactionMatchedItemIds(t).includes(itemId);}
+function transactionPaidKeys(t){
+  return transactionMatchedItemIds(t).map(id=>`${t.studentCode}|${id}`);
+}
+function findUniqueSubsetByAmount(items,target,maxSolutions=2){
+  const usable=items.filter(x=>num(x.amount)>0).slice(0,14),solutions=[];
+  function walk(index,sum,picked){
+    if(solutions.length>=maxSolutions||sum>target)return;
+    if(sum===target&&picked.length){solutions.push([...picked]);return;}
+    if(index>=usable.length)return;
+    walk(index+1,sum,picked);
+    picked.push(usable[index]);walk(index+1,sum+num(usable[index].amount),picked);picked.pop();
+  }
+  walk(0,0,[]);
+  return solutions.length===1?solutions[0]:null;
+}
+function noticeBundleForTransaction(t,student){
+  const haystack=slug(`${t.reportedPaymentCode||''} ${t.content||''} ${t.ref||''}`);
+  for(const [key,bundle] of noticeBundleCache){
+    if(!key||!haystack.includes(key))continue;
+    if(bundle.studentCode&&slug(bundle.studentCode)!==slug(student.code))continue;
+    if(num(bundle.amount)!==num(t.amount))continue;
+    return bundle;
+  }
+  return null;
+}
 function reconcileTransactions(students, transactions) {
   const byCode=new Map(students.map(s=>[slug(s.code),s]));const byPaymentCode=new Map();
   students.forEach(student=>studentDueItems(student).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),{student,item});}));
@@ -511,7 +547,20 @@ function reconcileTransactions(students, transactions) {
       const key=`${student.code}|${item.id}`;
       if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
       claimed.add(key);
-      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,paymentChannel:'cash'};
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:'cash'};
+    }
+    if(!alias){
+      const bundle=noticeBundleForTransaction(t,student);
+      const bundleItems=bundle?(bundle.itemIds||[]).map(id=>studentItems.find(x=>x.id===id)).filter(Boolean):[];
+      const available=studentItems.filter(item=>!item.legacy&&item.amount>0&&!claimed.has(`${student.code}|${item.id}`));
+      const matchedBundle=bundleItems.length&&bundleItems.reduce((s,x)=>s+num(x.amount),0)===amount?bundleItems:findUniqueSubsetByAmount(available,amount);
+      if(matchedBundle&&matchedBundle.length>1){
+        const keys=matchedBundle.map(item=>`${student.code}|${item.id}`);
+        if(keys.some(key=>claimed.has(key)))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:'other'};
+        keys.forEach(key=>claimed.add(key));
+        const cats=[...new Set(matchedBundle.map(x=>x.category))];
+        return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:cats.length===1?cats[0]:'other',feeDetail:matchedBundle.map(x=>x.name).join(' + '),matchedDueItem:matchedBundle.map(x=>x.name).join(' + '),matchedDueItemId:matchedBundle[0].id,matchedDueItemIds:matchedBundle.map(x=>x.id),paymentChannel:t.paymentChannel||'transfer',noticeBundleRemark:bundle?.remark||''};
+      }
     }
     const candidates=alias?[alias.item]:category==='other'?[]:studentItems.filter(item=>!item.legacy&&item.category===category&&item.amount===amount);
     if(!candidates.length) {
@@ -528,7 +577,7 @@ function reconcileTransactions(students, transactions) {
     const item=possible[0], key=`${student.code}|${item.id}`;
     if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
     claimed.add(key);
-    return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id};
+    return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer'};
   });
 }
 function feeSummaries(students, transactions) {
