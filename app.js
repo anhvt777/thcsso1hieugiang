@@ -409,14 +409,21 @@ async function confirmImport() {
     const byPaymentCode=new Map();students.forEach(s=>studentDueItems(s).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),s);}));
     const items = dataRows.map((row, i) => {
       const amount = parseAmount(cell(row, map, 'amount')); if (!amount) return null;
-      const code = cell(row, map, 'studentCode'); const student = code ? byCode.get(slug(code))||byPaymentCode.get(slug(code)) : null;
+      const reportedMoet=cell(row,map,'reportMoet')||cell(row,map,'studentCode');
+      const paymentCode=cell(row,map,'reportPaymentCode')||cell(row,map,'studentCode');
+      const reportName=cell(row,map,'reportCustomerName');
+      const reportClass=cell(row,map,'reportClass');
+      const reportPersonalId=cell(row,map,'reportPersonalId');
+      const student = (reportedMoet?byCode.get(slug(reportedMoet)):null) || (paymentCode?byPaymentCode.get(slug(paymentCode)):null) || (paymentCode?byCode.get(slug(paymentCode)):null);
       const date = normalizeDate(cell(row, map, 'date')); const content = cell(row, map, 'content');
-      const rawCategory = cell(row, map, 'feeCategory'); const codeCategory=feeCategoryFromPaymentCode(code); const feeCategory = codeCategory!=='other'?codeCategory:getFeeKey(rawCategory, content);
+      const service2=cell(row,map,'serviceLevel2'); const rawCategory=service2||cell(row,map,'feeCategory');
+      const codeCategory=feeCategoryFromPaymentCode(paymentCode); const feeCategory = getFeeKey(rawCategory,content)!=='other'?getFeeKey(rawCategory,content):(codeCategory!=='other'?codeCategory:getFeeKey('',content));
       const feeDetail = feeCategory === 'service' ? serviceDetail(rawCategory, content) : getFeeLabel(feeCategory);
       const bankStatus=cell(row,map,'bankStatus');
-      const ref = cell(row, map, 'txnId'); const normalizedRef = slug(ref);
-      const id = normalizedRef ? `ref:${normalizedRef}` : `row:${slug(date)}:${amount}:${slug(code || content)}:${i}`;
-      return { id, ref, date, content, amount, feeCategory, feeDetail, reportedStudentCode:code, reportedPaymentCode:code, bankStatus, studentCode:student?.code || '', studentName:student?.name || '', sourceFile:file.name, importedAt:now, matched:!!student };
+      const invoiceId=cell(row,map,'invoiceId');
+      const ref = cell(row, map, 'txnId')||invoiceId; const normalizedRef = slug(ref);
+      const id = normalizedRef ? `ref:${normalizedRef}` : `row:${slug(date)}:${amount}:${slug(reportedMoet||paymentCode||content)}:${i}`;
+      return { id, ref, invoiceId, date, content, amount, feeCategory, feeDetail, reportedStudentCode:reportedMoet, reportedPaymentCode:paymentCode, reportCustomerName:reportName, reportClass, reportPersonalId, serviceLevel2:service2, bankStatus, studentCode:student?.code || '', studentName:student?.name || reportName || '', sourceFile:file.name, importedAt:now, matched:!!student, paymentChannel:'transfer' };
     }).filter(Boolean);
     // Báo cáo thu mới nhất là ảnh chụp đầy đủ tại thời điểm xuất file.
     // Đồng bộ theo file hiện tại thay vì cộng dồn với các lần nhập trước,
@@ -489,10 +496,13 @@ function reconcileTransactions(students, transactions) {
   students.forEach(student=>studentDueItems(student).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),{student,item});}));
   const claimed=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
-    const reportedCode=t.reportedPaymentCode||t.reportedStudentCode||t.studentCode||'';
-    const alias=byPaymentCode.get(slug(reportedCode));const student=byCode.get(slug(reportedCode))||alias?.student;
-    if(!isSuccessfulBankStatus(t.bankStatus))return {...t,studentCode:student?.code||'',studentName:student?.name||'',matched:false,paymentStatus:'bank_not_successful',feeCategory:alias?.item.category||transactionCategory(t)};
-    if(!student)return {...t,studentCode:'',studentName:'',matched:false,paymentStatus:reportedCode?'unmatched':'missing_code'};
+    const paymentReported=t.reportedPaymentCode||'';
+    const studentReported=t.reportedStudentCode||t.studentCode||'';
+    const alias=paymentReported?byPaymentCode.get(slug(paymentReported)):null;
+    const student=alias?.student||(studentReported?byCode.get(slug(studentReported)):null)||(paymentReported?byCode.get(slug(paymentReported)):null);
+    const reportedCode=studentReported||paymentReported;
+    if(!isSuccessfulBankStatus(t.bankStatus))return {...t,studentCode:student?.code||'',studentName:student?.name||t.reportCustomerName||'',matched:false,paymentStatus:'bank_not_successful',feeCategory:alias?.item.category||transactionCategory(t)};
+    if(!student)return {...t,studentCode:'',studentName:t.reportCustomerName||'',matched:false,paymentStatus:reportedCode?'unmatched':'missing_code'};
     const studentItems=studentDueItems(student), category=alias?.item.category||transactionCategory(t), amount=num(t.amount);
     if(t.sourceType==='cash'&&t.manualDueItemId){
       const item=studentItems.find(x=>x.id===t.manualDueItemId);
