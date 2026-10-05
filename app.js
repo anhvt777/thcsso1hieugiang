@@ -588,7 +588,7 @@ function feeSummaries(students, transactions) {
     summaries[key].paid += amount;
     if (!paidByStudent.has(t.studentCode)) paidByStudent.set(t.studentCode, {});
     const map = paidByStudent.get(t.studentCode); map[key] = (map[key] || 0) + amount;
-    paidDueItems.add(`${t.studentCode}|${t.matchedDueItemId||slug(t.matchedDueItem||'')}`);
+    const ids=transactionMatchedItemIds(t);if(ids.length)ids.forEach(id=>paidDueItems.add(`${t.studentCode}|${id}`));else paidDueItems.add(`${t.studentCode}|${slug(t.matchedDueItem||'')}`);
   });
   students.forEach(student => {
     studentDueItems(student).forEach(item=>{const s=summaries[item.category]||summaries.other;s.due+=item.amount;s.dueItems++;if(paidDueItems.has(`${student.code}|${item.id||slug(item.name)}`))s.paidItems++;});
@@ -607,7 +607,7 @@ function totals(students, transactions) {
 }
 function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
-  const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
   const query = slug($('#studentSearch')?.value || '');
   const filtered = students.filter(s => {
     const warningCount=studentWarnings(s).length;
@@ -656,8 +656,8 @@ function renderClasses(students, transactions) {
       const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
       const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
-      const valid=classTransactions.filter(t=>t.paymentStatus==='valid'&&dueKeys.has(`${t.studentCode}|${t.matchedDueItemId||''}`));
-      const paidItems=new Set(valid.map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`)).size;
+      const valid=classTransactions.filter(t=>t.paymentStatus==='valid'&&transactionPaidKeys(t).some(key=>dueKeys.has(key)));
+      const paidItems=new Set(valid.flatMap(t=>transactionPaidKeys(t).filter(key=>dueKeys.has(key)))).size;
       const paid=valid.reduce((sum,t)=>sum+num(t.amount),0);
       m={dueItems:dueItems.length,paidItems,due,paid,remain:Math.max(0,due-paid)};
     }
@@ -670,7 +670,7 @@ function renderClassDetail(className, students, transactions) {
   const codes=new Set(classStudents.map(s=>s.code));
   const classTransactions=transactions.filter(t=>codes.has(t.studentCode));
   const valid=classTransactions.filter(t=>t.paymentStatus==='valid');
-  const paidItems=new Set(valid.map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  const paidItems=new Set(valid.flatMap(transactionPaidKeys));
   const feeGroups=new Map();
   classStudents.forEach(student=>studentDueItems(student).forEach(item=>{
     const key=item.name||getFeeLabel(item.category);
@@ -750,7 +750,7 @@ function buildVietQrPayload(config,amount,remark){
   payload+=crc16ccitt(payload);return payload;
 }
 function qrCandidates(students,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
   return students.flatMap(student=>studentDueItems(student).filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0).map(item=>({student,item,paid:paid.has(`${student.code}|${item.id}`)})));
 }
 function renderQrPage(students,transactions,config){
@@ -894,7 +894,7 @@ async function openStudentProfile(code){
 function closeStudentProfile(){$('#studentProfileBackdrop').classList.remove('open');}
 
 function unpaidCashCandidates(students,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId||''}`));
+  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
   return students.flatMap(student=>studentDueItems(student).filter(item=>item.amount>0&&!paid.has(`${student.code}|${item.id}`)).map(item=>({student,item})));
 }
 function renderCashEntry(students,transactions){
@@ -949,11 +949,10 @@ async function getReceiptConfig(){
 function receiptPaymentKey(student,item,txn){return `${student.code}|${item.id}|${txn.id}`;}
 function receiptCandidates(students,transactions){
   const byStudent=new Map(students.map(s=>[s.code,s]));
-  return transactions.filter(t=>t.paymentStatus==='valid'&&t.studentCode&&t.matchedDueItemId).map(t=>{
-    const student=byStudent.get(t.studentCode);if(!student)return null;
-    const item=studentDueItems(student).find(x=>x.id===t.matchedDueItemId);if(!item)return null;
-    return {paymentKey:receiptPaymentKey(student,item,t),student,item,txn:t};
-  }).filter(Boolean);
+  return transactions.filter(t=>t.paymentStatus==='valid'&&t.studentCode&&transactionMatchedItemIds(t).length).flatMap(t=>{
+    const student=byStudent.get(t.studentCode);if(!student)return [];
+    return transactionMatchedItemIds(t).map(id=>studentDueItems(student).find(x=>x.id===id)).filter(Boolean).map(item=>({paymentKey:receiptPaymentKey(student,item,t),student,item,txn:t}));
+  });
 }
 function receiptStateFor(candidate,receipts){
   const related=receipts.filter(r=>r.paymentKey===candidate.paymentKey).sort((a,b)=>(b.issuedAt||'').localeCompare(a.issuedAt||''));
@@ -1104,7 +1103,7 @@ async function refresh() {
   const [students,storedTransactions,history,qrConfig]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount')]);
   const transactions=reconcileTransactions(students,storedTransactions);
   const priorById=new Map(storedTransactions.map(t=>[t.id,t]));
-  if(transactions.some(t=>{const old=priorById.get(t.id);return !old||['paymentStatus','matched','studentCode','studentName','matchedDueItem','matchedDueItemId'].some(key=>t[key]!==old[key]);})) await putMany('transactions',transactions);
+  if(transactions.some(t=>{const old=priorById.get(t.id);return !old||['paymentStatus','matched','studentCode','studentName','matchedDueItem','matchedDueItemId','matchedDueItemIds'].some(key=>t[key]!==old[key]);})) await putMany('transactions',transactions);
   const t=totals(students,transactions);const classes=new Set(students.map(s=>s.className).filter(Boolean));
   $('#statStudents').textContent=students.length.toLocaleString('vi-VN');$('#statClasses').textContent=students.length?`${classes.size} lớp`:'Chưa có danh sách';
   $('#statFeeItems').textContent=t.dueItems.toLocaleString('vi-VN');$('#statDueAmount').textContent=`${money(t.due)} phải thu`;
