@@ -24,7 +24,6 @@
         <button class="nav-item" data-page="fees"><span class="nav-icon">▤</span>Khoản thu</button>
         <button class="nav-item" data-page="fee-setup"><span class="nav-icon">＋</span>Thiết lập khoản thu</button>
         <button class="nav-item" data-page="receipts"><span class="nav-icon">▣</span>Phiếu thu / Xác nhận</button>
-        <button class="nav-item" data-page="insurance"><span class="nav-icon">▦</span>QR Bảo hiểm · 2 phương án</button>
         <a class="nav-item qr-external-link" href="https://anhvt777.github.io/bidvqrgen/" target="_blank" rel="noopener noreferrer" aria-label="Mở công cụ tạo QR và thông báo nộp tiền trong tab mới"><span class="nav-icon">▦</span>Tạo QR & thông báo <span class="external-link-mark" aria-hidden="true">↗</span></a>
         <button class="nav-item" data-page="imports"><span class="nav-icon">⇧</span>Nhập dữ liệu</button>
         <button class="nav-item" data-page="history"><span class="nav-icon">▣</span>Tra cứu & báo cáo</button>
@@ -71,29 +70,6 @@
         <div class="bottom-grid">
           <article class="panel"><div class="panel-header"><div><h2>Giao dịch gần đây</h2><p>Các khoản thu được nhập gần nhất</p></div><button class="text-button" data-go="imports">Xem báo cáo <span>›</span></button></div><div class="recent-list" id="recentTransactions"><div class="empty-inline">Chưa có giao dịch được nhập.</div></div></article>
           <article class="panel privacy-card"><div class="privacy-mark">✓</div><div><h2>Dữ liệu riêng theo thiết bị</h2><p>Danh sách học sinh và báo cáo thu chỉ lưu trong trình duyệt của máy này. Hai máy không tự đồng bộ với nhau.</p><button class="text-button" data-go="settings">Xem cách sao lưu <span>›</span></button></div></article>
-        </div>
-      </section>
-
-      <section class="page" id="page-insurance">
-        <div class="page-heading"><div><span class="eyebrow">THÔNG BÁO THEO LỚP</span><h1>QR Bảo hiểm · 2 phương án</h1><p>Một thông báo, hai lựa chọn rõ ràng: BHYT hoặc BHYT + bảo hiểm thân thể.</p></div></div>
-        <div class="ib-layout">
-          <article class="panel ib-controls">
-            <h2>1. Chọn khoản thu</h2>
-            <p class="table-note">Dùng danh sách và khoản phải thu đã phân giao. Chọn đúng đợt thu / năm học.</p>
-            <label class="qr-field"><span>Khoản bảo hiểm y tế (BHYT)</span><select id="ibHealth"></select></label>
-            <label class="qr-field"><span>Khoản bảo hiểm thân thể (BHTT)</span><select id="ibBody"></select></label>
-            <div class="ib-fields"><label class="qr-field"><span>Năm học</span><input id="ibYear" value="2026–2027" maxlength="30"></label><label class="qr-field"><span>Hạn nộp</span><input id="ibDeadline" type="date"></label></div>
-            <label class="qr-field"><span>Liên hệ nhà trường</span><input id="ibContact" maxlength="100" placeholder="Tên cán bộ / số điện thoại"></label>
-            <h2>2. Phạm vi xuất</h2>
-            <label class="qr-field"><span>Chọn một hoặc nhiều lớp (Ctrl/Cmd để chọn nhiều)</span><select id="ibClasses" multiple size="5" aria-label="Lớp xuất thông báo"></select></label>
-            <label class="qr-field"><span>Trạng thái</span><select id="ibStatus"><option value="unpaid">Còn khoản chưa nộp</option><option value="all">Tất cả, gồm thông báo đã hoàn thành</option></select></label>
-            <div id="ibSummary" class="ib-summary" role="status"></div>
-            <details class="ib-account"><summary>3. Tài khoản nhận tiền</summary><p class="table-note">Dùng chung tài khoản nhận đã lưu ở công cụ QR. Kiểm tra đúng tài khoản của trường trước khi xuất.</p><label class="qr-field"><span>Mã BIN ngân hàng (BIDV: 970418)</span><input id="ibBin" inputmode="numeric" maxlength="6" placeholder="970418"></label><label class="qr-field"><span>Số tài khoản nhận</span><input id="ibAccount" maxlength="19" autocomplete="off"></label><label class="qr-field"><span>Tên chủ tài khoản</span><input id="ibAccountName" maxlength="60"></label><button class="button button-outline" id="ibSaveAccount">Lưu tài khoản</button></details>
-            <p class="table-note">QR chuyển khoản có mã tham chiếu riêng; không tự đăng ký mã khách hàng hay tài khoản định danh tại ngân hàng. Nhập báo cáo có mã tham chiếu trong nội dung để tự đối soát.</p>
-            <div class="ib-actions"><button class="button button-primary" id="ibPreview">Xem trước</button><button class="button button-outline" id="ibExport">Xuất ZIP ảnh + PDF theo lớp</button><button class="button button-outline" id="ibCancel" hidden>Hủy xuất</button></div>
-            <p id="ibProgress" role="status" aria-live="polite"></p>
-          </article>
-          <article class="panel ib-preview-panel"><div class="panel-header"><div><h2>Mẫu thông báo A5</h2><p id="ibPreviewLabel">Chọn khoản thu và bấm Xem trước.</p></div><div class="ib-pager"><button class="button button-outline button-small" id="ibPrev" aria-label="Thông báo trước" disabled>‹</button><button class="button button-outline button-small" id="ibNext" aria-label="Thông báo sau" disabled>›</button></div></div><div id="ibPreviewImage" class="ib-preview-image"><div class="empty-inline">Ảnh và PDF được tạo trên thiết bị này.</div></div><p class="table-note">Ảnh đã gửi không tự hết hiệu lực. Khi đã nộp tiền, phụ huynh không dùng lại QR cũ. Cập nhật báo cáo thu trước mỗi lần gửi nhắc.</p></article>
         </div>
       </section>
 

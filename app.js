@@ -477,6 +477,7 @@ async function chooseFile(kind, file) {
   catch (error) { console.error(error); toast(error.message || 'Không đọc được file này.', true); }
 }
 function setPage(page) {
+  if (page === 'insurance') page = 'dashboard';
   $$('.page').forEach(p => p.classList.toggle('active', p.id === `page-${page}`));
   $$('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   const labels = {
@@ -487,7 +488,6 @@ function setPage(page) {
     notices:['Thông báo nộp tiền','Xuất A4/PDF và ảnh QR hàng loạt gửi phụ huynh'],
     receipts:['Phiếu thu / Xác nhận','Phát hành chứng từ từ các món đã đối soát thành công'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
-    insurance:['QR Bảo hiểm · 2 phương án','BHYT hoặc BHYT + BHTT · Xuất thông báo theo lớp'],
     imports:['Nhập dữ liệu','Cập nhật cộng dồn nhiều báo cáo thu theo từng khoản, tự kiểm tra trùng giao dịch'],
     history:['Tra cứu & báo cáo','Lịch sử các lần nhập dữ liệu trên thiết bị này'],
     settings:['Sao lưu & cài đặt','Bảo vệ và chuyển dữ liệu theo quy trình của trường']
@@ -1313,7 +1313,6 @@ async function refresh() {
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
   const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);
-  await renderInsuranceTool(students,transactions,qrConfig);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -1427,7 +1426,6 @@ function exportStudents() {
   });
 }
 function wire() {
-  wireInsuranceTool();
   $$('.nav-item[data-page]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
   $$('[data-go]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.go)));
   $('#studentImportButton').onclick=$('#studentImportButton2').onclick=()=>$('#studentFileInput').click();
