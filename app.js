@@ -265,8 +265,11 @@ function getFeeKey(value, content = '') {
 }
 function feeCategoryFromPaymentCode(value) {
   const code=String(value||'').trim().toUpperCase().replace(/\s+/g,'');
-  if(code.endsWith('BHTT')||code.endsWith('TT'))return 'mandatory';
-  if(code.endsWith('BHYT')||code.endsWith('YT'))return 'insurance';
+  if(!code)return 'other';
+  // Mã BIDV thực tế có dạng ...BHTTHG...TT6D38 / ...BHYTHG...YT6A08,
+  // vì vậy không thể chỉ kiểm tra phần kết thúc chuỗi.
+  if(code.includes('BHTT')||/TT(?=[0-9A-Z])/.test(code))return 'mandatory';
+  if(code.includes('BHYT')||/YT(?=[0-9A-Z])/.test(code))return 'insurance';
   return 'other';
 }
 function getFeeLabel(key) { return FEES.find(f => f.key === key)?.label || 'Chưa phân loại'; }
@@ -1128,9 +1131,15 @@ async function getReceiptConfig(){
 function receiptPaymentKey(student,item,txn){return `${student.code}|${item.id}|${txn.id}`;}
 function receiptCandidates(students,transactions){
   const byStudent=new Map(students.map(s=>[s.code,s]));
-  return transactions.filter(t=>t.paymentStatus==='valid'&&t.studentCode&&transactionMatchedItemIds(t).length).flatMap(t=>{
+  return transactions.filter(t=>t.paymentStatus==='valid'&&t.studentCode).flatMap(t=>{
     const student=byStudent.get(t.studentCode);if(!student)return [];
-    return transactionMatchedItemIds(t).map(id=>studentDueItems(student).find(x=>x.id===id)).filter(Boolean).map(item=>({paymentKey:receiptPaymentKey(student,item,t),student,item,txn:t}));
+    let ids=transactionMatchedItemIds(t);
+    if(!ids.length){
+      const category=transactionCategory(t),amount=num(t.amount);
+      const possible=studentDueItems(student).filter(item=>item.amount===amount&&(category==='other'||item.category===category));
+      if(possible.length===1)ids=[possible[0].id];
+    }
+    return ids.map(id=>studentDueItems(student).find(x=>x.id===id)).filter(Boolean).map(item=>({paymentKey:receiptPaymentKey(student,item,t),student,item,txn:t}));
   });
 }
 function receiptStateFor(candidate,receipts){
@@ -1240,7 +1249,12 @@ async function renderReceiptPage(students,transactions){
   const [receipts,catalog,config]=await Promise.all([all('receipts'),getFeeCatalog(),getReceiptConfig()]);fillReceiptConfig(config);
   const candidates=receiptCandidates(students,transactions);populateReceiptFilters(candidates,catalog);renderCashEntry(students,transactions);
   const states=candidates.map(x=>receiptStateFor(x,receipts));$('#receiptReadyCount').textContent=states.filter(x=>x.status==='ready').length;$('#receiptIssuedCount').textContent=receipts.filter(r=>r.status==='issued').length;$('#receiptCancelledCount').textContent=receipts.filter(r=>r.status==='cancelled').length;
-  const filtered=receiptFilterCandidates(candidates,receipts);$('#receiptFilterSummary').textContent=filtered.length?`${filtered.length} món đã thu phù hợp bộ lọc`:'Không có món đã thu phù hợp bộ lọc.';
+  const filtered=receiptFilterCandidates(candidates,receipts);
+  const validTxnCount=transactions.filter(t=>t.paymentStatus==='valid').length;
+  const unmatchedTxnCount=transactions.filter(t=>t.paymentStatus!=='valid').length;
+  $('#receiptFilterSummary').textContent=filtered.length
+    ?`${filtered.length} món đã thu phù hợp bộ lọc`
+    :(validTxnCount? `${validTxnCount} giao dịch đã khớp nhưng không có món phù hợp bộ lọc.` : (transactions.length? `Đã có ${transactions.length} giao dịch nhưng ${unmatchedTxnCount} giao dịch chưa khớp học sinh/khoản thu.` : 'Chưa có giao dịch thu.'));
   $('#receiptTable').innerHTML=filtered.length?filtered.map(x=>{
     const state=receiptStateFor(x,receipts),r=state.receipt;const statusClass=state.status==='issued'?'paid':state.status==='cancelled'?'cancelled':'ready';
     const actions=state.status==='issued'?`<button class="text-button" data-receipt-print="${r.id}">In</button><button class="text-button danger-link" data-receipt-cancel="${r.id}">Hủy</button>`:`<button class="text-button" data-receipt-issue="${escapeHTML(x.paymentKey)}">${state.status==='cancelled'?'Phát hành lại':'Phát hành'}</button>`;
@@ -1283,7 +1297,7 @@ async function refresh() {
   setNoticeBundleCache(noticeBundles);
   const transactions=reconcileTransactions(students,storedTransactions);
   const priorById=new Map(storedTransactions.map(t=>[t.id,t]));
-  if(transactions.some(t=>{const old=priorById.get(t.id);return !old||['paymentStatus','matched','studentCode','studentName','matchedDueItem','matchedDueItemId','matchedDueItemIds'].some(key=>t[key]!==old[key]);})) await putMany('transactions',transactions);
+  if(transactions.some(t=>{const old=priorById.get(t.id);return !old||['paymentStatus','matched','studentCode','studentName','matchedDueItem','matchedDueItemId','matchedDueItemIds','matchedBy'].some(key=>t[key]!==old[key]);})) await putMany('transactions',transactions);
   const t=totals(students,transactions);const classes=new Set(students.map(s=>s.className).filter(Boolean));
   $('#statStudents').textContent=students.length.toLocaleString('vi-VN');$('#statClasses').textContent=students.length?`${classes.size} lớp`:'Chưa có danh sách';
   $('#statFeeItems').textContent=t.dueItems.toLocaleString('vi-VN');$('#statDueAmount').textContent=`${money(t.due)} phải thu`;
