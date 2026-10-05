@@ -184,17 +184,25 @@ function guessColumn(headers, field) {
     studentFeeAmount: ['so tien', 'so tien phai thu', 'fee amount'],
     studentFeeCategory: ['khoan nop', 'loai khoan nop', 'fee item'],
     paymentCode: ['ma hs theo khoan nop', 'ma khach hang', 'ma thanh toan', 'customer code'],
-    amount: ['so tien giao dich', 'amount', 'credit', 'ghi co', 'so tien'],
-    txnId: ['so hoa don', 'ma hoa don', 'ma giao dich', 'transaction id', 'ma tham chieu', 'reference', 'trace', 'so but toan'],
-    date: ['ngay giao dich', 'thoi gian', 'transaction date', 'ngay hach toan', 'ngay'],
-    content: ['noi dung chuyen khoan', 'ten khach hang', 'noi dung', 'dien giai', 'transaction content', 'description', 'chi tiet'],
-    studentCode: ['ma khach hang', 'ma hs theo khoan nop', 'ma hoc sinh', 'ma hs', 'student code', 'student id', 'ma dinh danh'],
-    feeCategory: ['khoan nop', 'khoan thu', 'loai khoan thu', 'danh muc thu', 'fee category', 'fee type'],
-    bankStatus: ['trang thai giao dich', 'trang thai', 'status']
+    reportPaymentCode: ['ma khach hang','so tai khoan dinh danh','ma thanh toan'],
+    reportMoet: ['thong tin bo sung 2','ma moet','ma hoc sinh','ma hs'],
+    reportClass: ['dia chi','lop','khoi lop'],
+    reportPersonalId: ['thong tin bo sung 1','sdd ca nhan','so dinh danh ca nhan','ma dinh danh ca nhan'],
+    reportCustomerName: ['ten khach hang','ten tai khoan dinh danh'],
+    serviceLevel1: ['dich vu cap 1'],
+    serviceLevel2: ['dich vu cap 2','khoan nop','khoan thu'],
+    invoiceId: ['ma hoa don','so hoa don'],
+    amount: ['so tien hoa don','so tien giao dich','amount','credit','ghi co','so tien'],
+    txnId: ['so tham chieu','ma tham chieu','ma giao dich','transaction id','reference','trace','so but toan','ma hoa don','so hoa don'],
+    date: ['ngay thanh toan','ngay giao dich','thoi gian','transaction date','ngay hach toan','ngay'],
+    content: ['noi dung thanh toan','noi dung chuyen khoan','dien giai','transaction content','description','chi tiet','ten khach hang'],
+    studentCode: ['ma moet','ma hoc sinh','ma hs theo khoan nop','ma khach hang','ma hs','student code','student id','ma dinh danh'],
+    feeCategory: ['dich vu cap 2','khoan nop','khoan thu','loai khoan thu','danh muc thu','fee category','fee type'],
+    bankStatus: ['trang thai','trang thai giao dich','status']
   }[field] || [];
-  const exact = normal.findIndex(h => patterns.includes(h));
-  if (exact >= 0) return String(exact);
-  return String(normal.findIndex(h => h && patterns.some(p => h.includes(p) || p.includes(h))));
+  for(const pattern of patterns){const i=normal.indexOf(pattern);if(i>=0)return String(i);}
+  for(const pattern of patterns){const i=normal.findIndex(h=>h&&(h.includes(pattern)||pattern.includes(h)));if(i>=0)return String(i);}
+  return '-1';
 }
 function fieldSelect(id, label, headers, field, required = false) {
   const guessed = guessColumn(headers, field);
@@ -215,7 +223,7 @@ function openImportModal(kind, file, rows) {
     ? longFormat
       ? `<div class="mapping-grid">${fieldSelect('map-code','Mã học sinh',headers,'code',true)}${fieldSelect('map-payment-code','Mã HS theo khoản nộp',headers,'paymentCode',true)}${fieldSelect('map-name','Họ và tên',headers,'name',true)}${fieldSelect('map-class','Lớp',headers,'className',true)}${fieldSelect('map-fee-category','Khoản nộp (BHYT/BHTT)',headers,'studentFeeCategory',true)}${fieldSelect('map-fee-amount','Số tiền phải thu',headers,'studentFeeAmount',true)}</div><p class="mapping-intro">Mỗi học sinh có một dòng BHYT và một dòng BHTT. Web tự ghép hai dòng theo mã học sinh và giữ mã từng khoản để đối soát với cột “Mã khách hàng” của ngân hàng.</p>`
       : `<div class="mapping-grid">${fieldSelect('map-code','Mã MOET / Mã học sinh',headers,'code',true)}${fieldSelect('map-name','Họ và tên',headers,'name',true)}${fieldSelect('map-class','Lớp',headers,'className',true)}${fieldSelect('map-personal-id','SĐD cá nhân',headers,'personalId')}${fieldSelect('map-gender','Giới tính',headers,'gender')}${fieldSelect('map-birth-date','Ngày sinh',headers,'birthDate')}${fieldSelect('map-ethnicity','Dân tộc',headers,'ethnicity')}${fieldSelect('map-father-name','Tên cha',headers,'fatherName')}${fieldSelect('map-mother-name','Tên mẹ',headers,'motherName')}${fieldSelect('map-phone','Điện thoại',headers,'phone')}</div><p class="mapping-intro">Web ưu tiên Mã MOET làm mã học sinh và lưu thêm thông tin hồ sơ. Các khoản thu sẽ được tạo, phân giao sau trên web nên file danh sách không cần có cột số tiền.</p>`
-    : `<div class="mapping-grid">${fieldSelect('map-amount','Số tiền giao dịch',headers,'amount',true)}${fieldSelect('map-student','Mã khách hàng / mã khoản nộp',headers,'studentCode')}${fieldSelect('map-txn','Số hóa đơn / mã giao dịch',headers,'txnId')}${fieldSelect('map-date','Ngày giao dịch',headers,'date')}${fieldSelect('map-content','Tên khách hàng / nội dung',headers,'content')}${fieldSelect('map-category','Khoản thu (nếu có)',headers,'feeCategory')}${fieldSelect('map-bank-status','Trạng thái giao dịch',headers,'bankStatus')}</div><p class="mapping-intro">Mã khách hàng kết thúc bằng YT hoặc TT sẽ được ghép với đúng khoản BHYT hoặc BHTT. Chỉ giao dịch thành công, đúng mã khoản và đúng số tiền mới được tính đã thu.</p>`;
+    : `<div class="mapping-grid">${fieldSelect('map-amount','Số tiền hóa đơn / giao dịch',headers,'amount',true)}${fieldSelect('map-report-moet','Mã MOET / mã học sinh',headers,'reportMoet')}${fieldSelect('map-report-payment','Mã khách hàng / TK định danh',headers,'reportPaymentCode')}${fieldSelect('map-report-name','Tên khách hàng',headers,'reportCustomerName')}${fieldSelect('map-report-class','Lớp / địa chỉ',headers,'reportClass')}${fieldSelect('map-report-personal','SĐD cá nhân',headers,'reportPersonalId')}${fieldSelect('map-service-2','Dịch vụ cấp 2 / khoản thu',headers,'serviceLevel2')}${fieldSelect('map-content','Nội dung thanh toán',headers,'content')}${fieldSelect('map-txn','Số tham chiếu / mã giao dịch',headers,'txnId')}${fieldSelect('map-invoice','Mã hóa đơn',headers,'invoiceId')}${fieldSelect('map-date','Ngày thanh toán',headers,'date')}${fieldSelect('map-bank-status','Trạng thái giao dịch',headers,'bankStatus')}</div><p class="mapping-intro"><strong>Mẫu BIDV Hiếu Giang:</strong> web ưu tiên “Thông tin bổ sung 2” để ghép Mã MOET, dùng “Dịch vụ cấp 2”/nội dung để xác định khoản thu và “Số tham chiếu” làm mã giao dịch. “Mã khách hàng” được lưu riêng để tra cứu, không bắt buộc phải trùng mã MOET.</p>`;
   $('#modalBody').innerHTML = `${summary}${fields}${previewHtml(headers, rows)}`;
   $('#modalConfirm').textContent = kind === 'students' ? 'Nhập danh sách' : 'Nhập & đối soát';
   $('#modalBackdrop').classList.add('open');
