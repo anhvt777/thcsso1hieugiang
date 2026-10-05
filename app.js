@@ -582,29 +582,23 @@ function reconcileTransactions(students, transactions) {
   });
 }
 function feeSummaries(students, transactions) {
-  const summaries = Object.fromEntries(FEES.map(f => [f.key, { ...f, due:0, paid:0, remain:0, dueItems:0, paidItems:0, pct:0 }]));
-  const paidByStudent = new Map(), paidDueItems=new Set();
-  transactions.filter(t => t.paymentStatus==='valid' && t.studentCode).forEach(t => {
-    const key = transactionCategory(t); const amount = num(t.amount);
-    summaries[key].paid += amount;
-    if (!paidByStudent.has(t.studentCode)) paidByStudent.set(t.studentCode, {});
-    const map = paidByStudent.get(t.studentCode); map[key] = (map[key] || 0) + amount;
-    const ids=transactionMatchedItemIds(t);if(ids.length)ids.forEach(id=>paidDueItems.add(`${t.studentCode}|${id}`));else paidDueItems.add(`${t.studentCode}|${slug(t.matchedDueItem||'')}`);
+  const summaries=Object.fromEntries(FEES.map(f=>[f.key,{...f,due:0,paid:0,remain:0,dueItems:0,paidItems:0,pct:0}]));
+  const paidByStudent=new Map(),paidKeys=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  students.forEach(student=>{
+    studentDueItems(student).forEach(item=>{
+      const summary=summaries[item.category]||summaries.other,key=`${student.code}|${item.id}`;
+      summary.due+=item.amount;summary.dueItems++;
+      if(paidKeys.has(key)){summary.paid+=item.amount;summary.paidItems++;if(!paidByStudent.has(student.code))paidByStudent.set(student.code,{});const map=paidByStudent.get(student.code);map[item.category]=(map[item.category]||0)+item.amount;}
+    });
   });
-  students.forEach(student => {
-    studentDueItems(student).forEach(item=>{const s=summaries[item.category]||summaries.other;s.due+=item.amount;s.dueItems++;if(paidDueItems.has(`${student.code}|${item.id||slug(item.name)}`))s.paidItems++;});
-  });
-  Object.values(summaries).forEach(s => { s.remain = Math.max(0, s.due - s.paid); s.pct = s.due ? Math.min(100, Math.round(s.paid / s.due * 100)) : 0; });
-  return { summaries, paidByStudent };
+  Object.values(summaries).forEach(s=>{s.remain=Math.max(0,s.due-s.paid);s.pct=s.due?Math.min(100,Math.round(s.paid/s.due*100)):0;});
+  return {summaries,paidByStudent};
 }
 function totals(students, transactions) {
-  const { summaries, paidByStudent } = feeSummaries(students, transactions);
-  const due = Object.values(summaries).reduce((sum,s)=>sum+s.due,0);
-  const paid = transactions.filter(t=>t.paymentStatus==='valid').reduce((sum,t)=>sum+num(t.amount),0);
-  const remain = Math.max(0,due-paid);
-  const dueItems = Object.values(summaries).reduce((sum,s)=>sum+s.dueItems,0);
-  const paidItems = Object.values(summaries).reduce((sum,s)=>sum+s.paidItems,0);
-  return { due, paid, remain, dueItems, paidItems, unpaidItems:Math.max(0,dueItems-paidItems), paidByStudent, summaries, pct:due ? Math.min(100,Math.round(paid/due*100)) : 0 };
+  const {summaries,paidByStudent}=feeSummaries(students,transactions);
+  const due=Object.values(summaries).reduce((sum,s)=>sum+s.due,0),paid=Object.values(summaries).reduce((sum,s)=>sum+s.paid,0);
+  const dueItems=Object.values(summaries).reduce((sum,s)=>sum+s.dueItems,0),paidItems=Object.values(summaries).reduce((sum,s)=>sum+s.paidItems,0);
+  return {due,paid,remain:Math.max(0,due-paid),dueItems,paidItems,unpaidItems:Math.max(0,dueItems-paidItems),paidByStudent,summaries,pct:due?Math.min(100,Math.round(paid/due*100)):0};
 }
 function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
@@ -657,9 +651,8 @@ function renderClasses(students, transactions) {
       const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
       const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
-      const valid=classTransactions.filter(t=>t.paymentStatus==='valid'&&transactionPaidKeys(t).some(key=>dueKeys.has(key)));
-      const paidItems=new Set(valid.flatMap(t=>transactionPaidKeys(t).filter(key=>dueKeys.has(key)))).size;
-      const paid=valid.reduce((sum,t)=>sum+num(t.amount),0);
+      const paidKeys=new Set(classTransactions.filter(t=>t.paymentStatus==='valid').flatMap(t=>transactionPaidKeys(t).filter(key=>dueKeys.has(key))));
+      const paidItems=paidKeys.size;const paid=g.students.flatMap(s=>studentDueItems(s).map(item=>({s,item}))).filter(x=>itemMatchesFeeFilter(x.item,filter)&&paidKeys.has(`${x.s.code}|${x.item.id}`)).reduce((sum,x)=>sum+x.item.amount,0);
       m={dueItems:dueItems.length,paidItems,due,paid,remain:Math.max(0,due-paid)};
     }
     const pct=m.due?Math.min(100,Math.round(m.paid/m.due*100)):0;
@@ -852,7 +845,7 @@ async function saveFeeAssignment(){
   if(scope!=='all'&&!targets.length)return toast('Hãy chọn ít nhất một đối tượng áp dụng.',true);
   const catalog=await getFeeCatalog();const duplicate=catalog.find(f=>f.id!==id&&feeSafeCode(f.code)===code);if(duplicate)return toast('Mã khoản đã tồn tại. Hãy dùng mã khác.',true);
   const existingFee=catalog.find(f=>f.id===id);
-  if(existingFee){const stored=await all('transactions'),tx=reconcileTransactions(students,stored),assigned=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));if(tx.some(t=>t.paymentStatus==='valid'&&assigned.has(`${t.studentCode}|${t.matchedDueItemId}`)))return toast('Khoản này đã có giao dịch thu. Để bảo toàn đối soát, không thể sửa hoặc phân giao lại; hãy tạo khoản mới.',true);}
+  if(existingFee){const stored=await all('transactions'),tx=reconcileTransactions(students,stored),assigned=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));if(tx.some(t=>t.paymentStatus==='valid'&&transactionPaidKeys(t).some(key=>assigned.has(key))))return toast('Khoản này đã có giao dịch thu. Để bảo toàn đối soát, không thể sửa hoặc phân giao lại; hãy tạo khoản mới.',true);}
   const chosen=feeTargetStudents(students,scope,targets);if(!chosen.length)return toast('Không có học sinh nào trong phạm vi đã chọn.',true);
   const codes=new Set();for(const s of students)for(const item of studentDueItems(s))if(item.paymentCode)codes.add(slug(item.paymentCode));
   const chosenSet=new Set(chosen.map(s=>s.code));const now=new Date().toISOString();
@@ -879,13 +872,13 @@ async function editFee(id){
 async function deleteFee(id){
   const [catalog,students,stored]=await Promise.all([getFeeCatalog(),all('students'),all('transactions')]);const f=catalog.find(x=>x.id===id);if(!f)return;
   const transactions=reconcileTransactions(students,stored);const assignedIds=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));
-  if(transactions.some(t=>t.paymentStatus==='valid'&&assignedIds.has(`${t.studentCode}|${t.matchedDueItemId}`)))return toast('Khoản này đã có giao dịch thu hợp lệ nên không thể xóa.',true);
+  if(transactions.some(t=>t.paymentStatus==='valid'&&transactionPaidKeys(t).some(key=>assignedIds.has(key))))return toast('Khoản này đã có giao dịch thu hợp lệ nên không thể xóa.',true);
   if(!confirm(`Xóa khoản “${f.name}” và toàn bộ phân giao chưa thu?`))return;
   const updated=students.map(s=>{const items=studentDueItems(s).filter(x=>x.catalogId!==id);return {...s,dueItems:items,due:items.reduce((a,x)=>a+x.amount,0),dueByCategory:items.reduce((o,x)=>(o[x.category]=(o[x.category]||0)+x.amount,o),{insurance:0,mandatory:0,service:0,other:0})};});
   await putMany('students',updated);await request('meta','put',feeCatalogRecord(catalog.filter(x=>x.id!==id)));await refresh();toast('Đã xóa khoản thu chưa phát sinh thanh toán.');
 }
 async function openStudentProfile(code){
-  const [students,stored]=await Promise.all([all('students'),all('transactions')]);const s=students.find(x=>x.code===code);if(!s)return;const tx=reconcileTransactions(students,stored);const paid=new Set(tx.filter(t=>t.paymentStatus==='valid'&&t.studentCode===code).map(t=>t.matchedDueItemId));
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]);const s=students.find(x=>x.code===code);if(!s)return;const tx=reconcileTransactions(students,stored);const paid=new Set(tx.filter(t=>t.paymentStatus==='valid'&&t.studentCode===code).flatMap(transactionMatchedItemIds));
   $('#studentProfileTitle').textContent=`${s.name} · ${s.className}`;$('#studentProfileSubtitle').textContent=`Mã MOET: ${s.code}`;
   const info=[['Giới tính',s.gender],['Ngày sinh',s.birthDate],['SĐD cá nhân',s.personalId],['Dân tộc',s.ethnicity],['Tên cha',s.fatherName],['Tên mẹ',s.motherName],['Điện thoại',s.phone]].filter(x=>x[1]);
   $('#studentProfileInfo').innerHTML=info.map(([k,v])=>`<div><span>${k}</span><strong>${escapeHTML(v)}</strong></div>`).join('')||'<div class="empty-inline">Chưa có thông tin hồ sơ bổ sung.</div>';
@@ -926,7 +919,7 @@ async function recordCashPayment(printAfter=false){
   const [students,stored]=await Promise.all([all('students'),all('transactions')]);const txs=reconcileTransactions(students,stored);
   const student=students.find(s=>s.code===$('#cashStudent').value),item=studentDueItems(student||{}).find(x=>x.id===$('#cashFee').value);
   if(!student||!item)return toast('Hãy chọn đúng học sinh và khoản chưa thu.',true);
-  if(txs.some(t=>t.paymentStatus==='valid'&&t.studentCode===student.code&&t.matchedDueItemId===item.id))return toast('Khoản này đã được ghi nhận đã thu.',true);
+  if(txs.some(t=>t.paymentStatus==='valid'&&t.studentCode===student.code&&transactionMatchesItem(t,item.id)))return toast('Khoản này đã được ghi nhận đã thu.',true);
   const date=$('#cashDate').value||new Date().toISOString().slice(0,10),payer=$('#cashPayer').value.trim(),note=$('#cashNote').value.trim();
   if(!payer)return toast('Hãy nhập người nộp tiền.',true);
   const id=`cash:${crypto.randomUUID()}`,cashTx={id,ref:`TM-${date.replace(/-/g,'')}-${String(Date.now()).slice(-6)}`,date,content:note||`Thu tiền mặt ${item.name}`,amount:item.amount,feeCategory:item.category,feeDetail:item.name,reportedStudentCode:student.code,reportedPaymentCode:item.paymentCode||student.code,bankStatus:'thanh cong',studentCode:student.code,studentName:student.name,sourceFile:'Ghi nhận thủ công',importedAt:new Date().toISOString(),matched:true,sourceType:'cash',paymentChannel:'cash',manualDueItemId:item.id,payerName:payer};
@@ -1310,11 +1303,11 @@ async function exportClassFeeReport(){
     for(const student of classStudents){
       const items=studentDueItems(student).filter(item=>itemMatchesFeeFilter(item,filter));
       const itemIds=new Set(items.map(item=>item.id));
-      const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&itemIds.has(t.matchedDueItemId||''));
-      const paidKeys=new Set(valid.map(t=>t.matchedDueItemId||''));
+      const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&transactionMatchedItemIds(t).some(id=>itemIds.has(id)));
+      const paidKeys=new Set(valid.flatMap(transactionMatchedItemIds));
       for(const item of items){
         const isPaid=paidKeys.has(item.id);
-        const txn=valid.find(t=>(t.matchedDueItemId||'')===item.id);
+        const txn=valid.find(t=>transactionMatchesItem(t,item.id));
         dueItems++;due+=item.amount;if(isPaid){paidItems++;paid+=item.amount;}
         details.push([className,student.code,student.name,item.name,item.amount,isPaid?'Đã thu':'Chưa thu',isPaid?item.amount:0,isPaid?0:item.amount,txn?.date||'',txn?.ref||'']);
       }
@@ -1352,7 +1345,7 @@ async function exportClassFeeReport(){
 
 function exportStudents() {
   Promise.all([all('students'),all('transactions')]).then(([items,stored])=>{
-    const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').map(t=>`${t.studentCode}|${t.matchedDueItemId}`));
+    const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
     const headers=['Mã MOET','Họ và tên','Lớp','SĐD cá nhân','Giới tính','Ngày sinh','Dân tộc','Tên cha','Tên mẹ','Điện thoại','Số món phải thu','Tổng phải thu','Đã thu','Còn lại'];
     const lines=items.map(s=>{const fees=studentDueItems(s),due=fees.reduce((a,x)=>a+x.amount,0),paidAmount=fees.filter(x=>paid.has(`${s.code}|${x.id}`)).reduce((a,x)=>a+x.amount,0);return [s.code,s.name,s.className,s.personalId||'',s.gender||'',s.birthDate||'',s.ethnicity||'',s.fatherName||'',s.motherName||'',s.phone||'',fees.length,due,paidAmount,Math.max(0,due-paidAmount)].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');});
     download('danh-sach-hoc-sinh-hieu-giang.csv','\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
