@@ -422,25 +422,44 @@ async function confirmImport() {
       const bankStatus=cell(row,map,'bankStatus');
       const invoiceId=cell(row,map,'invoiceId');
       const ref = cell(row, map, 'txnId')||invoiceId; const normalizedRef = slug(ref);
-      const id = normalizedRef ? `ref:${normalizedRef}` : `row:${slug(date)}:${amount}:${slug(reportedMoet||paymentCode||content)}:${i}`;
+      const id = normalizedRef ? `ref:${normalizedRef}` : `row:${slug(date)}:${amount}:${slug(paymentCode)}:${slug(reportedMoet)}:${slug(content)}`;
       return { id, ref, invoiceId, date, content, amount, feeCategory, feeDetail, reportedStudentCode:reportedMoet, reportedPaymentCode:paymentCode, reportCustomerName:reportName, reportClass, reportPersonalId, serviceLevel2:service2, bankStatus, studentCode:student?.code || '', studentName:student?.name || reportName || '', sourceFile:file.name, importedAt:now, matched:!!student, paymentChannel:'transfer' };
     }).filter(Boolean);
-    // Báo cáo thu mới nhất là ảnh chụp đầy đủ tại thời điểm xuất file.
-    // Đồng bộ theo file hiện tại thay vì cộng dồn với các lần nhập trước,
-    // tránh giữ lại giao dịch đã biến mất khỏi báo cáo mới.
+    // Mỗi món thu có thể được BIDV xuất thành một file riêng (BHYT, BHTT, dịch vụ...).
+    // Vì vậy không được xóa toàn bộ giao dịch ngân hàng khi nhập file tiếp theo.
+    // Số tham chiếu/mã giao dịch là khóa chính: giao dịch đã có được cập nhật,
+    // giao dịch mới được bổ sung, dữ liệu các món thu khác được giữ nguyên.
     const uniqueById=new Map();
     let duplicates=0;
     for(const t of items){
       if(uniqueById.has(t.id)) duplicates++;
       uniqueById.set(t.id,t);
     }
-    const bankSnapshot=[...uniqueById.values()];
-    const manualCash=(await all('transactions')).filter(t=>t.sourceType==='cash');
-    const snapshot=[...bankSnapshot,...manualCash];
-    await request('transactions','clear');
-    await putMany('transactions',snapshot);
-    summary = { rows:dataRows.length, imported:bankSnapshot.length, detail:`${bankSnapshot.length} giao dịch ngân hàng được đồng bộ${manualCash.length?` · giữ nguyên ${manualCash.length} giao dịch tiền mặt`:''}${duplicates ? ` · ${duplicates} dòng trùng trong file được gộp` : ''}` };
-    $('#bankLastImport').textContent = `Gần nhất: ${file.name} · ${snapshot.length.toLocaleString('vi-VN')} giao dịch`;
+    const incoming=[...uniqueById.values()];
+    const existing=await all('transactions');
+    const existingBank=existing.filter(t=>t.sourceType!=='cash');
+    const manualCash=existing.filter(t=>t.sourceType==='cash');
+    const oldById=new Map(existingBank.map(t=>[t.id,t]));
+    let added=0,updated=0,changed=0;
+    for(const t of incoming){
+      const old=oldById.get(t.id);
+      if(!old){added++;continue;}
+      updated++;
+      const compareFields=['ref','invoiceId','date','amount','reportedStudentCode','reportedPaymentCode','serviceLevel2','bankStatus','content'];
+      if(compareFields.some(k=>String(old[k]??'')!==String(t[k]??'')))changed++;
+    }
+    // putMany ghi đè đúng record có cùng id nhưng không đụng đến record của file/món thu khác.
+    await putMany('transactions',incoming);
+    const after=await all('transactions');
+    const bankTotal=after.filter(t=>t.sourceType!=='cash').length;
+    const feeLabels=[...new Set(incoming.map(t=>String(t.serviceLevel2||t.feeDetail||getFeeLabel(t.feeCategory)||'').trim()).filter(Boolean))];
+    const feeText=feeLabels.length===1?feeLabels[0]:(feeLabels.length>1?`${feeLabels.length} nhóm khoản thu`:'báo cáo thu');
+    summary = {
+      rows:dataRows.length,
+      imported:incoming.length,
+      detail:`${incoming.length} giao dịch ${feeText} được kiểm tra · ${added} mới · ${updated} đã có/cập nhật${changed?` (${changed} thay đổi)`:''} · giữ ${Math.max(0,existingBank.length-updated)} giao dịch từ các lần nhập trước · tổng ${bankTotal} giao dịch ngân hàng${manualCash.length?` + ${manualCash.length} tiền mặt`:''}${duplicates?` · ${duplicates} dòng trùng trong file được gộp`:''}`
+    };
+    $('#bankLastImport').textContent = `Gần nhất: ${file.name} · tổng ${bankTotal.toLocaleString('vi-VN')} giao dịch ngân hàng`;
   }
   await request('history', 'put', { id:crypto.randomUUID(), kind:kind === 'students' ? 'Danh sách học sinh' : 'Báo cáo thu', fileName:file.name, rows:summary.rows, imported:summary.imported, detail:summary.detail, at:now });
   closeModal(); await refresh(); toast(summary.detail);
@@ -465,7 +484,7 @@ function setPage(page) {
     notices:['Thông báo nộp tiền','Xuất A4/PDF và ảnh QR hàng loạt gửi phụ huynh'],
     receipts:['Phiếu thu / Xác nhận','Phát hành chứng từ từ các món đã đối soát thành công'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
-    imports:['Nhập dữ liệu','Cập nhật danh sách học sinh và báo cáo thu gần nhất'],
+    imports:['Nhập dữ liệu','Cập nhật cộng dồn nhiều báo cáo thu theo từng khoản, tự kiểm tra trùng giao dịch'],
     history:['Tra cứu & báo cáo','Lịch sử các lần nhập dữ liệu trên thiết bị này'],
     settings:['Sao lưu & cài đặt','Bảo vệ và chuyển dữ liệu theo quy trình của trường']
   };
