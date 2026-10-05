@@ -547,16 +547,54 @@ function noticeBundleForTransaction(t,student){
   }
   return null;
 }
+function buildStudentReportIndexes(students){
+  const byNameClass=new Map(),nameGroups=new Map(),byPersonalId=new Map();
+  students.forEach(student=>{
+    const nameKey=slug(student.name||''),classKey=slug(student.className||'');
+    if(nameKey&&classKey)byNameClass.set(slug(`${student.name} ${student.className}`),student);
+    if(nameKey){
+      if(!nameGroups.has(nameKey))nameGroups.set(nameKey,[]);
+      nameGroups.get(nameKey).push(student);
+    }
+    const pid=String(student.personalId||'').replace(/\s+/g,'');
+    if(pid)byPersonalId.set(pid,student);
+  });
+  const byUniqueName=new Map([...nameGroups.entries()].filter(([,arr])=>arr.length===1).map(([k,arr])=>[k,arr[0]]));
+  return {byNameClass,byUniqueName,byPersonalId};
+}
+function studentFromBankIdentity(t,indexes){
+  const reportName=String(t.reportCustomerName||t.studentName||'').trim();
+  const reportClass=String(t.reportClass||'').trim();
+  const personalId=String(t.reportPersonalId||'').replace(/\s+/g,'');
+  if(personalId&&indexes.byPersonalId.has(personalId))return indexes.byPersonalId.get(personalId);
+
+  if(reportName&&reportClass){
+    const direct=indexes.byNameClass.get(slug(`${reportName} ${reportClass}`));
+    if(direct)return direct;
+  }
+  if(reportName){
+    // BIDV thường trả "TEN HOC SINH 6A/7B..." trong cột Tên khách hàng.
+    const withClass=indexes.byNameClass.get(slug(reportName));
+    if(withClass)return withClass;
+
+    // Nếu tên báo cáo không kèm lớp, chỉ tự ghép khi họ tên là duy nhất trong toàn trường.
+    const unique=indexes.byUniqueName.get(slug(reportName));
+    if(unique)return unique;
+  }
+  return null;
+}
 function reconcileTransactions(students, transactions) {
   const byCode=new Map(students.map(s=>[slug(s.code),s]));const byPaymentCode=new Map();
   students.forEach(student=>studentDueItems(student).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),{student,item});}));
+  const reportIndexes=buildStudentReportIndexes(students);
   const claimed=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
     const paymentReported=t.reportedPaymentCode||'';
     const studentReported=t.reportedStudentCode||t.studentCode||'';
     const alias=paymentReported?byPaymentCode.get(slug(paymentReported)):null;
-    const student=alias?.student||(studentReported?byCode.get(slug(studentReported)):null)||(paymentReported?byCode.get(slug(paymentReported)):null);
-    const reportedCode=studentReported||paymentReported;
+    const identityStudent=studentFromBankIdentity(t,reportIndexes);
+    const student=alias?.student||(studentReported?byCode.get(slug(studentReported)):null)||(paymentReported?byCode.get(slug(paymentReported)):null)||identityStudent;
+    const reportedCode=studentReported||paymentReported||t.reportCustomerName||'';
     if(!isSuccessfulBankStatus(t.bankStatus))return {...t,studentCode:student?.code||'',studentName:student?.name||t.reportCustomerName||'',matched:false,paymentStatus:'bank_not_successful',feeCategory:alias?.item.category||transactionCategory(t)};
     if(!student)return {...t,studentCode:'',studentName:t.reportCustomerName||'',matched:false,paymentStatus:reportedCode?'unmatched':'missing_code'};
     const studentItems=studentDueItems(student), category=alias?.item.category||transactionCategory(t), amount=num(t.amount);
@@ -579,7 +617,7 @@ function reconcileTransactions(students, transactions) {
         if(keys.some(key=>claimed.has(key)))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:'other'};
         keys.forEach(key=>claimed.add(key));
         const cats=[...new Set(matchedBundle.map(x=>x.category))];
-        return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:cats.length===1?cats[0]:'other',feeDetail:matchedBundle.map(x=>x.name).join(' + '),matchedDueItem:matchedBundle.map(x=>x.name).join(' + '),matchedDueItemId:matchedBundle[0].id,matchedDueItemIds:matchedBundle.map(x=>x.id),paymentChannel:t.paymentChannel||'transfer',noticeBundleRemark:bundle?.remark||''};
+        return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:cats.length===1?cats[0]:'other',feeDetail:matchedBundle.map(x=>x.name).join(' + '),matchedDueItem:matchedBundle.map(x=>x.name).join(' + '),matchedDueItemId:matchedBundle[0].id,matchedDueItemIds:matchedBundle.map(x=>x.id),paymentChannel:t.paymentChannel||'transfer',noticeBundleRemark:bundle?.remark||'',matchedBy:alias?'payment_code':(identityStudent?'name_class':'derived')};
       }
     }
     const candidates=alias?[alias.item]:category==='other'?[]:studentItems.filter(item=>!item.legacy&&item.category===category&&item.amount===amount);
@@ -597,7 +635,7 @@ function reconcileTransactions(students, transactions) {
     const item=possible[0], key=`${student.code}|${item.id}`;
     if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
     claimed.add(key);
-    return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer'};
+    return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer',matchedBy:alias?'payment_code':(studentReported&&byCode.get(slug(studentReported))?'student_code':(identityStudent?'name_class':'derived'))};
   });
 }
 function feeSummaries(students, transactions) {
