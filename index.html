@@ -23,6 +23,7 @@
         <button class="nav-item" data-page="students"><span class="nav-icon">♧</span>Học sinh</button>
         <button class="nav-item" data-page="fees"><span class="nav-icon">▤</span>Khoản thu</button>
         <button class="nav-item" data-page="fee-setup"><span class="nav-icon">＋</span>Thiết lập khoản thu</button>
+        <button class="nav-item" data-page="notices"><span class="nav-icon">✉</span>Thông báo nộp tiền</button>
         <button class="nav-item" data-page="receipts"><span class="nav-icon">▣</span>Phiếu thu / Xác nhận</button>
         <a class="nav-item qr-external-link" href="https://anhvt777.github.io/bidvqrgen/" target="_blank" rel="noopener noreferrer" aria-label="Mở công cụ tạo mã QR trong tab mới"><span class="nav-icon">▦</span>Tạo mã QR <span class="external-link-mark" aria-hidden="true">↗</span></a>
         <button class="nav-item" data-page="imports"><span class="nav-icon">⇧</span>Nhập dữ liệu</button>
@@ -145,6 +146,44 @@
         <div class="qr-preview-grid" id="qrPreviewGrid"><div class="panel qr-empty-state">Nhập danh sách học sinh có chi tiết từng khoản phải thu để bắt đầu.</div></div>
       </section>
 
+      <section class="page" id="page-notices">
+        <div class="page-heading"><div><span class="eyebrow">GỬI PHỤ HUYNH</span><h1>Thông báo nộp tiền</h1><p>Tạo hàng loạt thông báo khoản thu có QR định danh để in A4 hoặc xuất ảnh gửi Zalo/phụ huynh.</p></div><span class="mini-tag">Tạo cục bộ</span></div>
+        <div class="notice-tool-grid">
+          <article class="panel notice-builder-card">
+            <div class="panel-header"><div><h2>1. Chọn đối tượng & khoản thu</h2><p>Mỗi học sinh tạo một thông báo và một QR tổng cho các món được chọn.</p></div><span class="category-badge">BIDV QR</span></div>
+            <div class="notice-form-grid">
+              <label class="qr-field"><span>Lớp</span><select id="noticeClass"><option value="all">Tất cả lớp</option></select></label>
+              <label class="qr-field"><span>Học sinh</span><select id="noticeStudent"><option value="all">Tất cả học sinh trong phạm vi</option></select></label>
+              <label class="qr-field"><span>Hạn nộp</span><input id="noticeDeadline" type="date"></label>
+              <label class="qr-field"><span>Trạng thái khoản</span><select id="noticeDueStatus"><option value="unpaid">Chỉ khoản chưa thu</option><option value="all">Tất cả khoản được phân giao</option></select></label>
+              <label class="qr-field notice-fee-select"><span>Khoản cần thông báo</span><select id="noticeFees" multiple size="7"><option value="all" selected>Tất cả khoản phù hợp</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Chọn “Tất cả” để lấy toàn bộ khoản phù hợp.</small></label>
+              <label class="qr-field notice-message-field"><span>Lời nhắn cuối thông báo</span><textarea id="noticeMessage" rows="4" maxlength="260">Nếu phụ huynh đã thanh toán, vui lòng bỏ qua thông báo này.</textarea></label>
+            </div>
+            <div class="notice-summary-box"><div><span>Số học sinh</span><strong id="noticeStudentCount">0</strong></div><div><span>Số món</span><strong id="noticeItemCount">0</strong></div><div><span>Tổng cần thông báo</span><strong id="noticeAmountTotal">0 ₫</strong></div></div>
+          </article>
+
+          <article class="panel notice-output-card">
+            <div class="panel-header"><div><h2>2. Kiểu đầu ra</h2><p>Hai mẫu dùng chung dữ liệu và QR thanh toán.</p></div></div>
+            <div class="notice-template-options">
+              <label class="notice-template-option selected"><input type="radio" name="noticeTemplate" value="a4" checked><div><strong>Mẫu A4 chuẩn</strong><span>Trang trọng, dễ in/PDF, mỗi học sinh một trang.</span></div><i>A4</i></label>
+              <label class="notice-template-option"><input type="radio" name="noticeTemplate" value="mobile"><div><strong>Mẫu ảnh điện thoại</strong><span>Gọn, QR lớn, phù hợp gửi Zalo/Messenger.</span></div><i>9:16</i></label>
+            </div>
+            <div class="notice-output-actions">
+              <button class="button button-outline" id="previewNotices">Xem trước</button>
+              <button class="button button-primary" id="printNoticeA4">In / Lưu PDF A4</button>
+              <button class="button button-primary" id="downloadNoticeImages">↓ Xuất ZIP ảnh PNG</button>
+            </div>
+            <div class="notice-export-note"><strong>QR thanh toán:</strong><span>QR được tạo ngay trên máy với số tiền tổng của các khoản đang chọn. Phần dưới QR hiển thị napas247 · BIDV · hoa mai vàng để phụ huynh dễ nhận biết kênh thanh toán.</span></div>
+          </article>
+        </div>
+
+        <article class="panel notice-preview-panel">
+          <div class="panel-header"><div><h2>Xem trước thông báo</h2><p id="noticePreviewSummary">Chọn dữ liệu rồi bấm “Xem trước”.</p></div><span class="mini-tag" id="noticeQrStatus">Chưa tạo QR</span></div>
+          <div class="notice-preview-list" id="noticePreviewList"><div class="empty-inline">Chưa có thông báo được tạo.</div></div>
+        </article>
+        <div class="mapping-note"><span class="note-icon">i</span><div><strong>Dữ liệu riêng tư:</strong><p>Ảnh/PDF được tạo hoàn toàn trong trình duyệt. Danh sách học sinh và số tiền không được gửi lên dịch vụ tạo ảnh bên ngoài.</p></div></div>
+      </section>
+
       <section class="page" id="page-receipts">
         <div class="page-heading"><div><span class="eyebrow">CHỨNG TỪ KHOẢN ĐÃ THU</span><h1>Phiếu thu / Xác nhận</h1><p>Phát hành chứng từ từ các món đã đối soát thành công. Chứng từ chuyển khoản mặc định là “Phiếu xác nhận thanh toán”.</p></div><button class="button button-outline" id="receiptConfigToggle">⚙ Thông tin chứng từ</button></div>
 
@@ -249,6 +288,7 @@
   </div>
   <div class="toast" id="toast" role="status"></div>
   <div class="modal-backdrop" id="modalBackdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-header"><div><div class="eyebrow" id="modalEyebrow">NHẬP FILE</div><h2 id="modalTitle">Ghép cột dữ liệu</h2></div><button class="icon-button" id="modalClose" aria-label="Đóng">×</button></div><div id="modalBody"></div><div class="modal-actions"><button class="button button-outline" id="modalCancel">Hủy</button><button class="button button-primary" id="modalConfirm">Xác nhận nhập</button></div></section></div>
+  <div class="notice-print-root" id="noticePrintRoot" aria-hidden="true"></div>
   <div class="receipt-print-root" id="receiptPrintRoot" aria-hidden="true"></div>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
