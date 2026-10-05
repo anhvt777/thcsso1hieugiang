@@ -462,6 +462,7 @@ function setPage(page) {
     students:['Học sinh','Danh sách và số phải thu chi tiết theo từng học sinh'],
     fees:['Khoản thu','Theo dõi riêng bảo hiểm, dịch vụ khác và từng nội dung dịch vụ'],
     'fee-setup':['Thiết lập khoản thu','Tạo và phân giao khoản thu theo toàn trường, khối, lớp hoặc học sinh'],
+    notices:['Thông báo nộp tiền','Xuất A4/PDF và ảnh QR hàng loạt gửi phụ huynh'],
     receipts:['Phiếu thu / Xác nhận','Phát hành chứng từ từ các món đã đối soát thành công'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
     imports:['Nhập dữ liệu','Cập nhật danh sách học sinh và báo cáo thu gần nhất'],
@@ -991,7 +992,7 @@ function qrDataUrl(payload,size=360){
   const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được QR.');return canvas.toDataURL('image/png');
 }
 function noticeBrandHtml(qr){
-  return `<div class="notice-branded-qr"><div class="bidv-flower">✿</div><img src="${qr}" alt="QR thanh toán"><div class="notice-qr-brands"><b>napas<span>247</span></b><i></i><strong>BIDV</strong><em>✿</em></div><small>Quét mã để thanh toán</small></div>`;
+  return `<div class="notice-branded-qr"><div class="bidv-flower">✿</div><div class="notice-qr-image"><img src="${qr}" alt="QR thanh toán"><span class="notice-qr-v">V</span></div><div class="notice-qr-brands"><b>napas<span>247</span></b><i></i><strong>BIDV</strong><em>✿</em></div><small>Quét mã để thanh toán</small></div>`;
 }
 async function buildNoticeEntries(){
   const [students,stored,config,receiptConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount'),getReceiptConfig()]);
@@ -1044,6 +1045,7 @@ async function noticeMobilePng(entry){
   entry.items.slice(0,6).forEach((item,i)=>{ctx.fillStyle='#eaf6fc';ctx.beginPath();ctx.arc(92,y+17,22,0,Math.PI*2);ctx.fill();ctx.fillStyle=dark;ctx.font='700 22px Arial';ctx.textAlign='center';ctx.fillText(String(i+1),92,y+5);ctx.textAlign='left';ctx.font='27px Arial';ctx.fillText(item.name,135,y);ctx.font='700 27px Arial';ctx.textAlign='right';ctx.fillText(money(item.amount),970,y);ctx.textAlign='left';ctx.strokeStyle=line;ctx.beginPath();ctx.moveTo(80,y+52);ctx.lineTo(985,y+52);ctx.stroke();y+=65;});
   const qrY=itemY+itemH+30;noticeCanvasRound(ctx,45,qrY,990,650,30,'#eefcfb','#d9ecea');ctx.fillStyle=dark;ctx.font='700 34px Arial';ctx.textAlign='center';ctx.fillText('Quét mã để thanh toán',W/2,qrY+30);ctx.font='24px Arial';ctx.fillStyle=muted;ctx.fillText('Không cần nhập lại số tiền hoặc nội dung chuyển khoản',W/2,qrY+78);drawFlower(ctx,W/2,qrY+138,46);
   const qrImg=new Image();qrImg.src=entry.qr;await new Promise((res,rej)=>{qrImg.onload=res;qrImg.onerror=rej;});ctx.drawImage(qrImg,320,qrY+175,440,440);
+  ctx.fillStyle='#fff';ctx.fillRect(513,qrY+368,54,54);ctx.fillStyle='#e72b3b';ctx.font='900 42px Arial';ctx.textAlign='center';ctx.fillText('V',540,qrY+374);
   ctx.font='italic 700 30px Arial';ctx.fillStyle='#245487';ctx.fillText('napas',420,qrY+630);ctx.fillStyle='#28a8df';ctx.fillText('247',515,qrY+630);ctx.fillStyle='#778698';ctx.fillRect(585,qrY+626,2,36);ctx.font='700 38px Arial';ctx.fillStyle=teal;ctx.fillText('BIDV',670,qrY+622);drawFlower(ctx,765,qrY+640,25);
   ctx.textAlign='left';noticeCanvasRound(ctx,45,H-150,990,95,28,'#e8f5ff');ctx.fillStyle='#245487';ctx.font='25px Arial';canvasWrap(ctx,entry.message,90,H-120,900,31,2);
   return canvas.toDataURL('image/png');
@@ -1227,7 +1229,8 @@ async function handleReceiptTableClick(e){
 }
 
 async function refresh() {
-  const [students,storedTransactions,history,qrConfig]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount')]);
+  const [students,storedTransactions,history,qrConfig,noticeBundles]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount'),getNoticeBundles()]);
+  setNoticeBundleCache(noticeBundles);
   const transactions=reconcileTransactions(students,storedTransactions);
   const priorById=new Map(storedTransactions.map(t=>[t.id,t]));
   if(transactions.some(t=>{const old=priorById.get(t.id);return !old||['paymentStatus','matched','studentCode','studentName','matchedDueItem','matchedDueItemId','matchedDueItemIds'].some(key=>t[key]!==old[key]);})) await putMany('transactions',transactions);
@@ -1242,7 +1245,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderReceiptPage(students,transactions);
+  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -1375,6 +1378,10 @@ function wire() {
   $('#saveFeeAssignment').onclick=()=>saveFeeAssignment().catch(e=>{console.error(e);toast(e.message||'Không tạo được khoản thu.',true);});
   $('#newFeeButton').onclick=async()=>resetFeeForm(await all('students'));$('#cancelFeeEdit').onclick=async()=>resetFeeForm(await all('students'));
   $('#feeCatalogList').addEventListener('click',e=>{const edit=e.target.closest('[data-fee-edit]'),del=e.target.closest('[data-fee-delete]');if(edit)editFee(edit.dataset.feeEdit);if(del)deleteFee(del.dataset.feeDelete);});
+  const refreshNoticeUi=async()=>{const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);const tx=reconcileTransactions(students,stored);populateNoticeControls(students,catalog);updateNoticeSummary(students,tx);};
+  $('#noticeClass').addEventListener('change',refreshNoticeUi);$('#noticeStudent').addEventListener('change',refreshNoticeUi);$('#noticeDueStatus').addEventListener('change',refreshNoticeUi);$('#noticeFees').addEventListener('change',e=>{const selected=[...e.currentTarget.selectedOptions];if(selected.length>1&&selected.some(o=>o.value==='all'))e.currentTarget.querySelector('option[value="all"]').selected=false;refreshNoticeUi();});$('#noticeDeadline').addEventListener('change',refreshNoticeUi);
+  $('input[name="noticeTemplate"]').forEach(r=>r.addEventListener('change',()=>{$('.notice-template-option').forEach(x=>x.classList.toggle('selected',x.querySelector('input').checked));if(window.__noticeEntries)renderNoticePreview(window.__noticeEntries);}));
+  $('#previewNotices').onclick=()=>previewNotices().catch(e=>{console.error(e);toast(e.message||'Không tạo được xem trước.',true);});$('#printNoticeA4').onclick=()=>printNoticeA4().catch(e=>{console.error(e);toast(e.message||'Không tạo được bản A4.',true);});$('#downloadNoticeImages').onclick=()=>downloadNoticeImages().catch(e=>{console.error(e);toast(e.message||'Không xuất được ảnh thông báo.',true);});
   $('#saveReceiptConfig').onclick=saveReceiptConfig;$('#receiptConfigToggle').onclick=()=>$('#receiptConfigCard').classList.toggle('collapsed');
   ['receiptFeeFilter','receiptClassFilter','receiptStudentFilter','receiptStatusFilter','receiptMethodFilter','receiptDateFrom','receiptDateTo'].forEach(id=>$(`#${id}`).addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderReceiptPage(students,reconcileTransactions(students,stored));}));
   $('#cashClass').addEventListener('change',refreshCashEntry);$('#cashStudent').addEventListener('change',refreshCashEntry);$('#cashFee').addEventListener('change',refreshCashEntry);
