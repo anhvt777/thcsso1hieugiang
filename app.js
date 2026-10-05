@@ -487,6 +487,7 @@ function setPage(page) {
     notices:['Thông báo nộp tiền','Xuất A4/PDF và ảnh QR hàng loạt gửi phụ huynh'],
     receipts:['Phiếu thu / Xác nhận','Phát hành chứng từ từ các món đã đối soát thành công'],
     qr:['Tạo mã QR','Tạo QR thanh toán theo từng món thu của từng học sinh'],
+    insurance:['QR Bảo hiểm · 2 phương án','BHYT hoặc BHYT + BHTT · Xuất thông báo theo lớp'],
     imports:['Nhập dữ liệu','Cập nhật cộng dồn nhiều báo cáo thu theo từng khoản, tự kiểm tra trùng giao dịch'],
     history:['Tra cứu & báo cáo','Lịch sử các lần nhập dữ liệu trên thiết bị này'],
     settings:['Sao lưu & cài đặt','Bảo vệ và chuyển dữ liệu theo quy trình của trường']
@@ -592,6 +593,8 @@ function reconcileTransactions(students, transactions) {
   const reportIndexes=buildStudentReportIndexes(students);
   const claimed=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
+    const insuranceResult=reconcileInsuranceTransaction(t,byCode,claimed);
+    if(insuranceResult)return insuranceResult;
     const paymentReported=t.reportedPaymentCode||'';
     const studentReported=t.reportedStudentCode||t.studentCode||'';
     const alias=paymentReported?byPaymentCode.get(slug(paymentReported)):null;
@@ -1003,7 +1006,7 @@ async function getNoticeBundles(){return (await request('meta','get','noticeBund
 async function saveNoticeBundles(entries){
   const old=await getNoticeBundles(),map=new Map((old.items||[]).map(x=>[slug(x.remark),x]));
   entries.forEach(x=>map.set(slug(x.remark),x));
-  const items=[...map.values()].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,5000);
+  const items=[...map.values()].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   const record={key:'noticeBundles',items};await request('meta','put',record);setNoticeBundleCache(record);
 }
 function noticeSelectedFeeKeys(){
@@ -1310,6 +1313,7 @@ async function refresh() {
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
   const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);
+  await renderInsuranceTool(students,transactions,qrConfig);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -1423,6 +1427,7 @@ function exportStudents() {
   });
 }
 function wire() {
+  wireInsuranceTool();
   $$('.nav-item[data-page]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
   $$('[data-go]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.go)));
   $('#studentImportButton').onclick=$('#studentImportButton2').onclick=()=>$('#studentFileInput').click();
@@ -1465,6 +1470,7 @@ function wire() {
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(err=>console.warn('Offline cache:',err));
 }
 document.addEventListener('DOMContentLoaded',async()=>{
+  if(!$('#storageStatus'))return; // Standalone visual tests do not open the production database.
   try { db=await openDatabase();wire();await refresh(); }
   catch(error){console.error(error);$('#storageStatus').textContent='Không mở được kho dữ liệu';toast('Trình duyệt không cho phép lưu dữ liệu cục bộ.',true);}
 });

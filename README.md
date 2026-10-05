@@ -26,3 +26,17 @@
 Mở qua máy chủ web tĩnh HTTPS, chẳng hạn GitHub Pages. Tránh mở trực tiếp bằng `file://` vì trình duyệt có thể chặn IndexedDB và service worker. Với GitHub Pages của repository, đặt `index.html` ở thư mục gốc của nhánh được chọn làm nguồn Pages.
 
 Trước khi dùng dữ liệu thật, hãy đối chiếu tên cột và cách ghi mã học sinh trong file gốc của trường/ngân hàng; kiểm tra tổng số dòng và tổng tiền với báo cáo nguồn.
+
+## QR Bảo hiểm · 2 phương án
+
+- Mở tab **QR Bảo hiểm · 2 phương án**, chọn chính xác khoản BHYT và BHTT đã phân giao, năm học, hạn nộp và lớp. Không tự gán mức đóng mới.
+- Kiểm tra và lưu tài khoản của trường ở mục **Tài khoản nhận tiền**, dùng chung cấu hình QR hiện có. Xem trước rồi xuất ZIP gồm PNG từng học sinh, PDF A5 từng lớp và bảng mã CSV. Tên file gồm BHYT, BHTT và lớp.
+- Chưa nộp: có QR BHYT và QR BHYT + BHTT. Đã nộp một khoản: chỉ còn QR khoản còn lại. Đã hoàn thành: không có QR, có thể xuất thông báo hoàn thành bằng bộ lọc “Tất cả”. Hồ sơ thiếu hoặc trùng khoản bị loại và được liệt kê để kiểm tra.
+- Đây là QR chuyển khoản đến tài khoản đã cấu hình, có mã tham chiếu `IB` + 20 ký tự hex. Web **không tự đăng ký mã khách hàng, hóa đơn thu hộ hoặc tài khoản định danh tại BIDV**. Mã được tạo ổn định theo học sinh, khoản thu, số tiền, tài khoản và năm học; không cắt ngắn mã học sinh để tạo mã.
+- Để tự đối soát QR này, báo cáo ngân hàng cần có mã IB đầy đủ trong nội dung chuyển khoản, mã thanh toán hoặc tham chiếu. Báo cáo thu hộ chỉ có mã KH cũ và không có mã IB sẽ không đủ để xác định phương án mới. Cần kiểm tra luồng nhận báo cáo phù hợp trước khi phát hành thật.
+- Mã phương án được lưu cùng bảng phân bổ từng khoản trong `meta.noticeBundles` và bản sao lưu mã hóa. Không xóa mã đã phát hành khi xuất lại. Sao lưu sau khi tạo thông báo, khôi phục bản sao lưu nếu đổi máy; CSV tra cứu không thay thế bản sao lưu.
+- Giao dịch có mã IB chỉ khớp khi mã, khoản và số tiền khớp nguyên vẹn. Không dùng tổng tiền để suy đoán phương án; sai tiền, mã lạ, thiếu khoản hoặc mã mâu thuẫn được giữ lại để kiểm tra. Thanh toán cả hai QR: giao dịch chồng khoản bị đánh dấu trùng, không tự cộng lần hai. Kế toán cần xác minh và xử lý tiền thừa; web không tự hoàn tiền.
+- QR ảnh đã gửi **không tự hết hiệu lực và không khóa được tại ngân hàng**. Cập nhật báo cáo trước khi xuất nhắc thu; thông báo yêu cầu phụ huynh chỉ trả một phương án và không trả lại khoản đã nộp.
+- QR có vùng trắng bốn module, không chèn logo vào mã. Trước khi phát hành toàn trường, quét thử bằng ứng dụng ngân hàng để kiểm tra người nhận, số tiền và mã nội dung; chưa thực hiện chuyển tiền chỉ để thử giao diện.
+
+Kiểm thử logic bằng dữ liệu giả: `node tests/insurance.test.cjs`.
