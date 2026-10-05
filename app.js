@@ -937,6 +937,133 @@ async function recordCashPayment(printAfter=false){
   if(printAfter)await issueReceiptCandidates([{paymentKey:receiptPaymentKey(student,item,valid),student,item,txn:valid}],{print:true});else{await refresh();toast('Đã ghi nhận khoản thu tiền mặt.');}
 }
 
+function noticeHash(value){
+  let h=2166136261;for(const ch of String(value)){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return (h>>>0).toString(36).toUpperCase().slice(0,5);
+}
+function noticeRemark(student,items){
+  const code=feeSafeCode(student.code,10)||'HS';
+  const seed=items.map(x=>x.id+'='+num(x.amount)).sort().join('|');
+  return (`HG${code}TB${noticeHash(student.code+'|'+seed)}`).slice(0,25);
+}
+async function getNoticeBundles(){return (await request('meta','get','noticeBundles'))||{key:'noticeBundles',items:[]};}
+async function saveNoticeBundles(entries){
+  const old=await getNoticeBundles(),map=new Map((old.items||[]).map(x=>[slug(x.remark),x]));
+  entries.forEach(x=>map.set(slug(x.remark),x));
+  const items=[...map.values()].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,5000);
+  const record={key:'noticeBundles',items};await request('meta','put',record);setNoticeBundleCache(record);
+}
+function noticeSelectedFeeKeys(){
+  const values=selectedValues($('#noticeFees'));return !values.length||values.includes('all')?null:new Set(values);
+}
+function noticeItemKey(item){return item.catalogId?`catalog:${item.catalogId}`:`name:${slug(item.name)}`;}
+function noticeCandidates(students,transactions){
+  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const cls=$('#noticeClass')?.value||'all',studentCode=$('#noticeStudent')?.value||'all',status=$('#noticeDueStatus')?.value||'unpaid',feeKeys=noticeSelectedFeeKeys();
+  return students.filter(s=>(cls==='all'||s.className===cls)&&(studentCode==='all'||s.code===studentCode)).map(student=>{
+    const items=studentDueItems(student).filter(item=>!item.legacy&&item.amount>0).filter(item=>status==='all'||!paid.has(`${student.code}|${item.id}`)).filter(item=>!feeKeys||feeKeys.has(noticeItemKey(item)));
+    return {student,items,total:items.reduce((sum,x)=>sum+num(x.amount),0)};
+  }).filter(x=>x.items.length&&x.total>0);
+}
+function populateNoticeControls(students,catalog){
+  const classEl=$('#noticeClass'),studentEl=$('#noticeStudent'),feeEl=$('#noticeFees');if(!classEl)return;
+  const currentClass=classEl.value||'all',currentStudent=studentEl.value||'all',selected=new Set(selectedValues(feeEl));
+  const classes=[...new Set(students.map(s=>s.className).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
+  classEl.innerHTML='<option value="all">Tất cả lớp</option>'+classes.map(v=>`<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join('');
+  classEl.value=classes.includes(currentClass)?currentClass:'all';
+  const scoped=students.filter(s=>classEl.value==='all'||s.className===classEl.value).sort((a,b)=>a.className.localeCompare(b.className,'vi',{numeric:true})||a.name.localeCompare(b.name,'vi'));
+  studentEl.innerHTML='<option value="all">Tất cả học sinh trong phạm vi</option>'+scoped.map(s=>`<option value="${escapeHTML(s.code)}">${escapeHTML(s.className||'')} · ${escapeHTML(s.name)} · ${escapeHTML(s.code)}</option>`).join('');
+  studentEl.value=scoped.some(s=>s.code===currentStudent)?currentStudent:'all';
+  const unique=new Map();
+  students.forEach(s=>studentDueItems(s).forEach(item=>{if(!item.legacy&&item.amount>0){const k=noticeItemKey(item);if(!unique.has(k))unique.set(k,item);}}));
+  feeEl.innerHTML='<option value="all">Tất cả khoản phù hợp</option>'+[...unique.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name,'vi')).map(([k,item])=>`<option value="${escapeHTML(k)}">${escapeHTML(item.name)} · ${money(item.amount)}</option>`).join('');
+  const kept=[...feeEl.options].filter(o=>selected.has(o.value));if(kept.length)kept.forEach(o=>o.selected=true);else feeEl.options[0].selected=true;
+  if(!$('#noticeDeadline').value){const d=new Date();d.setDate(d.getDate()+10);$('#noticeDeadline').value=d.toISOString().slice(0,10);}
+}
+function updateNoticeSummary(students,transactions){
+  const groups=noticeCandidates(students,transactions),items=groups.reduce((n,x)=>n+x.items.length,0),amount=groups.reduce((n,x)=>n+x.total,0);
+  $('#noticeStudentCount').textContent=groups.length.toLocaleString('vi-VN');$('#noticeItemCount').textContent=items.toLocaleString('vi-VN');$('#noticeAmountTotal').textContent=money(amount);
+  return groups;
+}
+function noticeDateVi(value){if(!value)return '—';const [y,m,d]=value.split('-');return `${d}/${m}/${y}`;}
+function qrDataUrl(payload,size=360){
+  if(typeof QRCode==='undefined')throw new Error('Thiếu thư viện tạo QR.');
+  const holder=document.createElement('div');new QRCode(holder,{text:payload,width:size,height:size,correctLevel:QRCode.CorrectLevel.H});
+  const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được QR.');return canvas.toDataURL('image/png');
+}
+function noticeBrandHtml(qr){
+  return `<div class="notice-branded-qr"><div class="bidv-flower">✿</div><img src="${qr}" alt="QR thanh toán"><div class="notice-qr-brands"><b>napas<span>247</span></b><i></i><strong>BIDV</strong><em>✿</em></div><small>Quét mã để thanh toán</small></div>`;
+}
+async function buildNoticeEntries(){
+  const [students,stored,config,receiptConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount'),getReceiptConfig()]);
+  if(!config?.bin||!config?.accountNumber||!config?.accountName)throw new Error('Hãy cấu hình tài khoản nhận tiền ở mục Tạo mã QR trước.');
+  const transactions=reconcileTransactions(students,stored),groups=noticeCandidates(students,transactions);if(!groups.length)throw new Error('Không có học sinh/khoản thu phù hợp để tạo thông báo.');
+  const deadline=$('#noticeDeadline').value||'',message=$('#noticeMessage').value.trim(),now=new Date().toISOString(),bundles=[],entries=[];
+  for(const group of groups){
+    const remark=noticeRemark(group.student,group.items),payload=buildVietQrPayload(config,group.total,remark),qr=qrDataUrl(payload,420);
+    const bundle={remark,studentCode:group.student.code,itemIds:group.items.map(x=>x.id),amount:group.total,deadline,createdAt:now};
+    bundles.push(bundle);entries.push({...group,remark,qr,deadline,message,school:{parentUnit:receiptConfig.parentUnit||'UBND XÃ HIẾU GIANG',schoolName:receiptConfig.schoolName||'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:receiptConfig.schoolAddress||'',head:receiptConfig.head||''},qrConfig:config});
+  }
+  await saveNoticeBundles(bundles);return entries;
+}
+function noticeA4Html(entry){
+  const rows=entry.items.map((item,i)=>`<tr><td>${i+1}</td><td>${escapeHTML(item.name)}</td><td>${money(item.amount)}</td></tr>`).join('');
+  return `<article class="notice-a4-sheet">
+    <div class="notice-a4-letterhead"><div><strong>${escapeHTML(entry.school.parentUnit)}</strong><b>${escapeHTML(entry.school.schoolName)}</b></div><div><strong>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</strong><b>Độc lập - Tự do - Hạnh phúc</b></div></div>
+    <h1>THÔNG BÁO KHOẢN THU HỌC SINH</h1>
+    <div class="notice-a4-student"><div><span>Học sinh</span><strong>${escapeHTML(entry.student.name)}</strong></div><div><span>Ngày sinh</span><strong>${escapeHTML(entry.student.birthDate||'—')}</strong></div><div><span>Lớp</span><strong>${escapeHTML(entry.student.className||'—')}</strong></div><div><span>Mã HS / MOET</span><strong>${escapeHTML(entry.student.code)}</strong></div></div>
+    <h2>Chi tiết các khoản thu</h2><table><thead><tr><th>STT</th><th>Nội dung khoản thu</th><th>Số tiền</th></tr></thead><tbody>${rows}<tr class="notice-total-row"><td colspan="2">Tổng cộng</td><td>${money(entry.total)}</td></tr></tbody></table>
+    <div class="notice-a4-words"><b>Bằng chữ:</b> ${escapeHTML(receiptAmountWords(entry.total))}.</div>
+    <div class="notice-a4-payment"><div>${noticeBrandHtml(entry.qr)}</div><div class="notice-a4-guide"><h2>Hướng dẫn thanh toán</h2><p><b>1.</b> Quý phụ huynh quét QR để thanh toán.</p><p>QR đã có sẵn tổng tiền và mã tham chiếu <strong>${escapeHTML(entry.remark)}</strong>, không cần nhập lại nội dung.</p><p><b>2. Hạn nộp:</b> <strong class="notice-deadline">Trước ngày ${escapeHTML(noticeDateVi(entry.deadline))}</strong></p><p><b>3.</b> Sau khi thanh toán thành công, nhà trường cập nhật theo báo cáo thu BIDV.</p><p class="notice-parent-message">${escapeHTML(entry.message)}</p></div></div>
+    <div class="notice-a4-sign"><div></div><div><i>Hiếu Giang, ngày ${new Intl.DateTimeFormat('vi-VN').format(new Date())}</i><strong>HIỆU TRƯỞNG</strong><span>${escapeHTML(entry.school.head||'')}</span></div></div>
+  </article>`;
+}
+function renderNoticePreview(entries){
+  const template=document.querySelector('input[name="noticeTemplate"]:checked')?.value||'a4';
+  $('#noticePreviewSummary').textContent=`${entries.length} thông báo · ${entries.reduce((n,x)=>n+x.items.length,0)} món thu`;$('#noticeQrStatus').textContent=`${entries.length} QR đã tạo`;
+  $('#noticePreviewList').innerHTML=entries.slice(0,6).map(e=>template==='a4'?noticeA4Html(e):`<article class="notice-mobile-preview"><div class="notice-mobile-head"><strong>${escapeHTML(e.school.schoolName)}</strong><span>Thông báo khoản thu học sinh</span></div><div class="notice-mobile-person"><b>${escapeHTML(e.student.name)}</b><span>${escapeHTML(e.student.className||'')} · ${escapeHTML(e.student.birthDate||'')}</span><small>Mã HS: ${escapeHTML(e.student.code)}</small></div><div class="notice-mobile-total"><span>TỔNG PHẢI NỘP</span><strong>${money(e.total)}</strong><b>Hạn nộp: ${escapeHTML(noticeDateVi(e.deadline))}</b></div><div class="notice-mobile-items">${e.items.map((x,i)=>`<div><span>${i+1}. ${escapeHTML(x.name)}</span><strong>${money(x.amount)}</strong></div>`).join('')}</div>${noticeBrandHtml(e.qr)}<p>${escapeHTML(e.message)}</p></article>`).join('')+(entries.length>6?'<div class="notice-preview-more">… và '+(entries.length-6)+' thông báo khác sẽ được xuất.</div>':'');
+}
+function noticeCanvasRound(ctx,x,y,w,h,r,fill,stroke){
+  const rr=Math.min(r,w/2,h/2);ctx.beginPath();ctx.roundRect(x,y,w,h,rr);if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.stroke();}
+}
+function canvasWrap(ctx,text,x,y,maxWidth,lineHeight,maxLines=10){
+  const words=String(text).split(/\s+/);let line='',lines=[];
+  for(const word of words){const test=line?line+' '+word:word;if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=word;}else line=test;}
+  if(line)lines.push(line);lines=lines.slice(0,maxLines);lines.forEach((l,i)=>ctx.fillText(l,x,y+i*lineHeight));return y+lines.length*lineHeight;
+}
+function drawFlower(ctx,x,y,s){
+  ctx.save();ctx.fillStyle='#F7B928';for(let i=0;i<5;i++){const a=-Math.PI/2+i*Math.PI*2/5;ctx.beginPath();ctx.arc(x+Math.cos(a)*s*.34,y+Math.sin(a)*s*.34,s*.27,0,Math.PI*2);ctx.fill();}ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,y,s*.22,0,Math.PI*2);ctx.fill();ctx.restore();
+}
+async function noticeMobilePng(entry){
+  const W=1080,H=1920,canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#f8fcff';ctx.fillRect(0,0,W,H);ctx.textBaseline='top';
+  const dark='#10335f',teal='#087f78',muted='#61738b',line='#d7eaf5';
+  ctx.fillStyle='#e9f7ff';ctx.fillRect(0,0,W,190);ctx.fillStyle=dark;ctx.font='700 44px Arial';ctx.fillText(entry.school.schoolName,70,55);ctx.font='30px Arial';ctx.fillStyle=muted;ctx.fillText('Thông báo khoản thu học sinh',70,113);
+  noticeCanvasRound(ctx,45,215,990,205,30,'#fff','#d9e9f2');ctx.fillStyle=dark;ctx.font='700 40px Arial';ctx.fillText(entry.student.name,105,260);ctx.font='28px Arial';ctx.fillStyle=muted;ctx.fillText(`Lớp ${entry.student.className||'—'}  •  ${entry.student.birthDate||'—'}`,105,320);ctx.fillText(`Mã HS: ${entry.student.code}`,105,360);
+  noticeCanvasRound(ctx,45,450,990,230,34,'#e5f8fb');ctx.fillStyle=dark;ctx.font='700 34px Arial';ctx.fillText('TỔNG PHẢI NỘP',105,492);ctx.fillStyle=teal;ctx.font='700 72px Arial';ctx.fillText(money(entry.total),105,545);noticeCanvasRound(ctx,740,500,245,120,24,'#fff0ef');ctx.fillStyle='#cf4944';ctx.font='26px Arial';ctx.fillText('Hạn nộp:',775,525);ctx.font='700 30px Arial';ctx.fillText(noticeDateVi(entry.deadline),775,566);
+  const itemY=715,itemH=Math.min(410,115+entry.items.length*65);noticeCanvasRound(ctx,45,itemY,990,itemH,30,'#fff','#d9e9f2');ctx.fillStyle=dark;ctx.font='700 34px Arial';ctx.fillText('Chi tiết khoản thu',85,itemY+30);let y=itemY+90;ctx.font='27px Arial';
+  entry.items.slice(0,6).forEach((item,i)=>{ctx.fillStyle='#eaf6fc';ctx.beginPath();ctx.arc(92,y+17,22,0,Math.PI*2);ctx.fill();ctx.fillStyle=dark;ctx.font='700 22px Arial';ctx.textAlign='center';ctx.fillText(String(i+1),92,y+5);ctx.textAlign='left';ctx.font='27px Arial';ctx.fillText(item.name,135,y);ctx.font='700 27px Arial';ctx.textAlign='right';ctx.fillText(money(item.amount),970,y);ctx.textAlign='left';ctx.strokeStyle=line;ctx.beginPath();ctx.moveTo(80,y+52);ctx.lineTo(985,y+52);ctx.stroke();y+=65;});
+  const qrY=itemY+itemH+30;noticeCanvasRound(ctx,45,qrY,990,650,30,'#eefcfb','#d9ecea');ctx.fillStyle=dark;ctx.font='700 34px Arial';ctx.textAlign='center';ctx.fillText('Quét mã để thanh toán',W/2,qrY+30);ctx.font='24px Arial';ctx.fillStyle=muted;ctx.fillText('Không cần nhập lại số tiền hoặc nội dung chuyển khoản',W/2,qrY+78);drawFlower(ctx,W/2,qrY+138,46);
+  const qrImg=new Image();qrImg.src=entry.qr;await new Promise((res,rej)=>{qrImg.onload=res;qrImg.onerror=rej;});ctx.drawImage(qrImg,320,qrY+175,440,440);
+  ctx.font='italic 700 30px Arial';ctx.fillStyle='#245487';ctx.fillText('napas',420,qrY+630);ctx.fillStyle='#28a8df';ctx.fillText('247',515,qrY+630);ctx.fillStyle='#778698';ctx.fillRect(585,qrY+626,2,36);ctx.font='700 38px Arial';ctx.fillStyle=teal;ctx.fillText('BIDV',670,qrY+622);drawFlower(ctx,765,qrY+640,25);
+  ctx.textAlign='left';noticeCanvasRound(ctx,45,H-150,990,95,28,'#e8f5ff');ctx.fillStyle='#245487';ctx.font='25px Arial';canvasWrap(ctx,entry.message,90,H-120,900,31,2);
+  return canvas.toDataURL('image/png');
+}
+async function previewNotices(){
+  const entries=await buildNoticeEntries();renderNoticePreview(entries);window.__noticeEntries=entries;return entries;
+}
+async function printNoticeA4(){
+  const entries=await buildNoticeEntries(),root=$('#noticePrintRoot');root.innerHTML=entries.map(noticeA4Html).join('');document.body.classList.add('printing-notices');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printing-notices'),400);},80);
+}
+async function downloadNoticeImages(){
+  if(typeof JSZip==='undefined')throw new Error('Thiếu thư viện ZIP.');
+  const entries=await buildNoticeEntries(),zip=new JSZip();let done=0;$('#noticeQrStatus').textContent='Đang tạo ảnh…';
+  for(const entry of entries){const png=await noticeMobilePng(entry),folder=zip.folder(qrText(entry.student.className||'Chua_xep_lop',30)||'Chua_xep_lop');folder.file(`${feeSafeCode(entry.student.className||'LOP',10)}_${feeSafeCode(entry.student.code,14)}_${qrText(entry.student.name,30).replace(/\s+/g,'_')}.png`,png.split(',')[1],{base64:true});done++;$('#noticeQrStatus').textContent=`${done}/${entries.length} ảnh`;}
+  const blob=await zip.generateAsync({type:'blob'});download(`Thong_bao_khoan_thu_${new Date().toISOString().slice(0,10)}.zip`,blob,'application/zip');$('#noticeQrStatus').textContent=`${entries.length} ảnh đã xuất`;toast(`Đã xuất ${entries.length} ảnh thông báo.`);
+}
+async function renderNoticeTool(students,transactions,catalog){
+  populateNoticeControls(students,catalog);updateNoticeSummary(students,transactions);
+}
+
 function receiptConfigDefaults(){
   return {key:'receiptConfig',parentUnit:'UBND XÃ HIẾU GIANG',schoolName:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',schoolAddress:'',unitCode:'',transferPrefix:'XN',cashPrefix:'PT',preparer:'',cashier:'',accountant:'',head:''};
 }
