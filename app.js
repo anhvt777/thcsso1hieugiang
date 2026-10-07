@@ -480,6 +480,7 @@ async function confirmImport() {
       ]
     };
     $('#bankLastImport').textContent = `Gần nhất: ${file.name} · tổng ${bankTotal.toLocaleString('vi-VN')} giao dịch ngân hàng`;
+    await request('meta','put',{key:'cashBankReview',fileName:file.name,at:now,warnings:summary.warnings||[],confirmedCashConflicts:confirmedCashConflicts.length,pendingCashConflicts:pendingCashConflicts.length});
   }
   await request('history', 'put', { id:crypto.randomUUID(), kind:kind === 'students' ? 'Danh sách học sinh' : 'Báo cáo thu', fileName:file.name, rows:summary.rows, imported:summary.imported, detail:summary.detail, at:now });
   closeModal(); await refresh();
@@ -1464,7 +1465,7 @@ async function handleReceiptTableClick(e){
 }
 
 async function refresh() {
-  const [students,storedTransactions,history,qrConfig,noticeBundles]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount'),getNoticeBundles()]);
+  const [students,storedTransactions,history,qrConfig,noticeBundles,cashBankReview]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount'),getNoticeBundles(),request('meta','get','cashBankReview')]);
   setNoticeBundleCache(noticeBundles);
   const transactions=reconcileTransactions(students,storedTransactions);
   const priorById=new Map(storedTransactions.map(t=>[t.id,t]));
@@ -1486,6 +1487,14 @@ async function refresh() {
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
   ['matchedTxnCount','importsMatchedTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.filter(x=>x.paymentStatus==='valid').length;});
   ['unmatchedTxnCount','importsUnmatchedTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.filter(x=>x.paymentStatus!=='valid').length;});
+  if($('#cashBankConflictList')){
+    const warnings=cashBankReview?.warnings||[];
+    $('#cashBankConflictCount').textContent=`${warnings.length} cảnh báo`;
+    $('#cashBankConflictCount').classList.toggle('warning-tag',warnings.length>0);
+    $('#cashBankConflictList').innerHTML=warnings.length
+      ?warnings.map((w,i)=>`<div class="cash-bank-conflict-item"><b>${i+1}</b><span>${escapeHTML(w)}</span></div>`).join('')
+      :'<div class="empty-inline">Chưa phát hiện xung đột tiền mặt/BIDV.</div>';
+  }
   $('#recentTransactions').innerHTML=transactions.length?[...transactions].sort((a,b)=>(b.importedAt||'').localeCompare(a.importedAt||'')).slice(0,4).map(x=>`<div class="recent-row"><strong><span class="category-badge ${transactionCategory(x)==='service'?'service':''}">${getFeeLabel(transactionCategory(x))}</span> ${escapeHTML(x.studentName||x.content||'Giao dịch thu')}</strong><span>${escapeHTML(x.date||'—')}</span><b>${money(x.amount)}</b></div>`).join(''):'<div class="empty-inline">Chưa có giao dịch được nhập.</div>';
   $('#historyTable').innerHTML=history.length?history.sort((a,b)=>b.at.localeCompare(a.at)).map(h=>`<tr><td>${dateTime(h.at)}</td><td>${escapeHTML(h.kind)}</td><td>${escapeHTML(h.fileName)}</td><td>${h.rows}</td><td>${escapeHTML(h.detail)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty-cell">Chưa có lịch sử nhập file.</td></tr>';
   $('#storageStatus').textContent='Kho trình duyệt đã sẵn sàng';
