@@ -441,6 +441,18 @@ async function confirmImport() {
     }
     const incoming=[...uniqueById.values()];
     const existing=await all('transactions');
+    const existingReconciled=reconcileTransactions(students,existing);
+    const incomingReconciled=reconcileTransactions(students,incoming);
+    const confirmedCashKeys=new Set(existingReconciled.filter(t=>t.paymentStatus==='valid'&&t.sourceType==='cash').flatMap(transactionPaidKeys));
+    const cashDraft=await getCashSessionDraft();
+    const pendingCashKeys=new Set((cashDraft.selections||[]).map(x=>cashSessionKey(x.studentCode,x.itemId)));
+    const confirmedCashConflicts=[],pendingCashConflicts=[];
+    incomingReconciled.filter(t=>t.paymentStatus==='valid').forEach(t=>{
+      transactionPaidKeys(t).forEach(key=>{
+        if(confirmedCashKeys.has(key))confirmedCashConflicts.push({key,t});
+        if(pendingCashKeys.has(key))pendingCashConflicts.push({key,t});
+      });
+    });
     const existingBank=existing.filter(t=>t.sourceType!=='cash');
     const manualCash=existing.filter(t=>t.sourceType==='cash');
     const oldById=new Map(existingBank.map(t=>[t.id,t]));
@@ -461,12 +473,20 @@ async function confirmImport() {
     summary = {
       rows:dataRows.length,
       imported:incoming.length,
-      detail:`${incoming.length} giao dịch ${feeText} được kiểm tra · ${added} mới · ${updated} đã có/cập nhật${changed?` (${changed} thay đổi)`:''} · giữ ${Math.max(0,existingBank.length-updated)} giao dịch từ các lần nhập trước · tổng ${bankTotal} giao dịch ngân hàng${manualCash.length?` + ${manualCash.length} tiền mặt`:''}${duplicates?` · ${duplicates} dòng trùng trong file được gộp`:''}`
+      detail:`${incoming.length} giao dịch ${feeText} được kiểm tra · ${added} mới · ${updated} đã có/cập nhật${changed?` (${changed} thay đổi)`:''} · giữ ${Math.max(0,existingBank.length-updated)} giao dịch từ các lần nhập trước · tổng ${bankTotal} giao dịch ngân hàng${manualCash.length?` + ${manualCash.length} tiền mặt đã xác nhận`:''}${confirmedCashConflicts.length?` · CẢNH BÁO ${confirmedCashConflicts.length} giao dịch trùng khoản đã thu tiền mặt`:''}${pendingCashConflicts.length?` · CẢNH BÁO ${pendingCashConflicts.length} giao dịch trùng phiên tiền mặt chưa xác nhận`:''}${duplicates?` · ${duplicates} dòng trùng trong file được gộp`:''}`,
+      warnings:[
+        ...confirmedCashConflicts.map(x=>`Trùng tiền mặt đã xác nhận: ${x.t.studentName||x.t.reportCustomerName||x.key} · ${x.t.feeDetail||getFeeLabel(x.t.feeCategory)} · ${money(x.t.amount)}`),
+        ...pendingCashConflicts.map(x=>`Trùng phiên tiền mặt chưa xác nhận: ${x.t.studentName||x.t.reportCustomerName||x.key} · ${x.t.feeDetail||getFeeLabel(x.t.feeCategory)} · ${money(x.t.amount)}`)
+      ]
     };
     $('#bankLastImport').textContent = `Gần nhất: ${file.name} · tổng ${bankTotal.toLocaleString('vi-VN')} giao dịch ngân hàng`;
   }
   await request('history', 'put', { id:crypto.randomUUID(), kind:kind === 'students' ? 'Danh sách học sinh' : 'Báo cáo thu', fileName:file.name, rows:summary.rows, imported:summary.imported, detail:summary.detail, at:now });
-  closeModal(); await refresh(); toast(summary.detail);
+  closeModal(); await refresh();
+  if(summary.warnings?.length){
+    console.warn('Đối chiếu tiền mặt/BIDV:',summary.warnings);
+    toast(summary.detail,true);
+  }else toast(summary.detail);
 }
 function toast(message, error = false) {
   const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show');
@@ -1398,7 +1418,7 @@ function populateReceiptFilters(candidates,catalog){
 }
 async function renderReceiptPage(students,transactions){
   const [receipts,catalog,config]=await Promise.all([all('receipts'),getFeeCatalog(),getReceiptConfig()]);fillReceiptConfig(config);
-  const candidates=receiptCandidates(students,transactions);populateReceiptFilters(candidates,catalog);renderCashEntry(students,transactions);
+  const candidates=receiptCandidates(students,transactions);populateReceiptFilters(candidates,catalog);renderCashEntry(students,transactions);await renderCashSession(students,transactions);
   const states=candidates.map(x=>receiptStateFor(x,receipts));$('#receiptReadyCount').textContent=states.filter(x=>x.status==='ready').length;$('#receiptIssuedCount').textContent=receipts.filter(r=>r.status==='issued').length;$('#receiptCancelledCount').textContent=receipts.filter(r=>r.status==='cancelled').length;
   const filtered=receiptFilterCandidates(candidates,receipts);
   const validTxnCount=transactions.filter(t=>t.paymentStatus==='valid').length;
@@ -1708,7 +1728,17 @@ function wire() {
   $('#saveReceiptConfig').onclick=saveReceiptConfig;$('#receiptConfigToggle').onclick=()=>$('#receiptConfigCard').classList.toggle('collapsed');
   ['receiptFeeFilter','receiptClassFilter','receiptStudentFilter','receiptStatusFilter','receiptMethodFilter','receiptDateFrom','receiptDateTo'].forEach(id=>$(`#${id}`).addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderReceiptPage(students,reconcileTransactions(students,stored));}));
   $('#cashClass').addEventListener('change',refreshCashEntry);$('#cashStudent').addEventListener('change',refreshCashEntry);$('#cashFee').addEventListener('change',refreshCashEntry);
-  $('#recordCashPayment').onclick=()=>recordCashPayment(false).catch(e=>{console.error(e);toast(e.message||'Không ghi nhận được tiền mặt.',true);});$('#recordAndPrintCash').onclick=()=>recordCashPayment(true).catch(e=>{console.error(e);toast(e.message||'Không ghi nhận/in được phiếu thu.',true);});
+  $('#recordCashPayment').onclick=()=>recordCashPayment().catch(e=>{console.error(e);toast(e.message||'Không thêm được vào phiên tiền mặt.',true);});$('#recordAndPrintCash').onclick=()=>{};
+  const rerenderCashSession=async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderCashSession(students,reconcileTransactions(students,stored));};
+  $('#cashSessionClass').addEventListener('change',async()=>{const draft=await getCashSessionDraft();draft.className=$('#cashSessionClass').value;await saveCashSessionDraft(draft);await rerenderCashSession();});
+  $('#cashSessionSearch').addEventListener('input',rerenderCashSession);
+  $('#cashSessionDate').addEventListener('change',async()=>{const draft=await getCashSessionDraft();draft.date=$('#cashSessionDate').value;await saveCashSessionDraft(draft);await rerenderCashSession();});
+  $('#cashSessionCashier').addEventListener('input',async()=>{const draft=await getCashSessionDraft();draft.cashier=$('#cashSessionCashier').value.trim();await saveCashSessionDraft(draft);const [students,stored]=await Promise.all([all('students'),all('transactions')]);updateCashSessionTotals(draft,students,reconcileTransactions(students,stored));});
+  $('#cashSessionActual').addEventListener('input',async()=>{const raw=$('#cashSessionActual').value,draft=await getCashSessionDraft();draft.actual=parseMoneyInput(raw);await saveCashSessionDraft(draft);const [students,stored]=await Promise.all([all('students'),all('transactions')]);updateCashSessionTotals(draft,students,reconcileTransactions(students,stored));});
+  $('#cashSessionBody').addEventListener('change',e=>{const box=e.target.closest('.cash-session-check-item');if(box)toggleCashSessionSelection(box.dataset.student,box.dataset.item,box.checked).catch(err=>{console.error(err);toast('Không cập nhật được phiên tiền mặt.',true);});});
+  $('#exportCashSession').onclick=()=>exportCashSession().catch(e=>{console.error(e);toast('Không xuất được bảng kê phiên.',true);});
+  $('#clearCashSession').onclick=()=>clearCashSession().catch(e=>{console.error(e);toast('Không xóa được lựa chọn phiên.',true);});
+  $('#confirmCashSession').onclick=()=>confirmCashSession().catch(e=>{console.error(e);toast(e.message||'Không xác nhận được phiên tiền mặt.',true);});
   $('#issueFilteredReceipts').onclick=()=>issueFilteredReceipts().catch(e=>{console.error(e);toast(e.message||'Không phát hành được chứng từ.',true);});$('#printIssuedReceipts').onclick=()=>printIssuedFilteredReceipts().catch(e=>{console.error(e);toast('Không in được chứng từ.',true);});$('#exportReceiptRegister').onclick=exportReceiptRegister;$('#receiptTable').addEventListener('click',e=>handleReceiptTableClick(e).catch(err=>{console.error(err);toast(err.message||'Không thực hiện được thao tác chứng từ.',true);}));
   $('#classFeeFilter').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);renderClasses(students,reconcileTransactions(students,stored));});
   $('#exportClassFeeReport').onclick=()=>exportClassFeeReport().catch(e=>{console.error(e);toast('Không xuất được báo cáo Excel.',true);});
