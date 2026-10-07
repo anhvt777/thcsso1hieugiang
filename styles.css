@@ -103,3 +103,14 @@
 @media(max-width:1100px){.ib-layout{grid-template-columns:1fr}.ib-preview-panel{max-width:800px;width:100%}.ib-preview-image{padding:8px}}
 @media(max-width:600px){.ib-controls{padding:18px}.ib-fields{grid-template-columns:1fr}.ib-preview-panel{padding:12px}.ib-preview-image{padding:0}.ib-preview-panel .panel-header{gap:10px}.ib-actions .button{width:100%}}
 .ib-actions [hidden]{display:none!important}.ib-controls select[multiple]{height:150px;padding:8px}
+
+
+/* Paid collection report */
+.paid-report-card{padding:19px;margin-bottom:16px}
+.paid-report-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.paid-report-fees{grid-column:1/-1}
+.paid-report-fees select{min-height:150px}
+.paid-report-fees small{font-size:9px;color:var(--muted);margin-top:5px}
+.paid-report-actions{margin-top:13px}
+@media(max-width:980px){.paid-report-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.paid-report-grid{grid-template-columns:1fr}.paid-report-fees{grid-column:auto}}
