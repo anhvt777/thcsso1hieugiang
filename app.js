@@ -1313,7 +1313,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);
+  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);await renderPaidReportTool(students,transactions,feeCatalog);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -1571,6 +1571,12 @@ function wire() {
   $('#classDetailBackdrop').addEventListener('click',e=>{if(e.target.id==='classDetailBackdrop')closeClassDetail();});
   $('#saveQrConfig').onclick=saveQrConfig;$('#generateQrs').onclick=()=>generateQrs().catch(e=>{console.error(e);toast(e.message||'Không tạo được mã QR.',true);});
   ['qrFeeFilter','qrClassFilter','qrStatusFilter'].forEach(id=>$(`#${id}`).addEventListener('change',()=>$('#downloadQrs').hidden=true));
+  const refreshPaidReport=async()=>{const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);const tx=reconcileTransactions(students,stored);populatePaidReportControls(students,catalog,tx);updatePaidReportSummary(students,tx);};
+  $('#paidReportClass').addEventListener('change',refreshPaidReport);
+  $('#paidReportStudent').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
+  $('#paidReportCondition').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
+  $('#paidReportFees').addEventListener('change',async e=>{const selected=[...e.currentTarget.selectedOptions];if(selected.length>1&&selected.some(o=>o.value==='all'))e.currentTarget.querySelector('option[value="all"]').selected=false;const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
+  $('#exportPaidReport').onclick=()=>exportPaidReport().catch(e=>{console.error(e);toast(e.message||'Không xuất được danh sách đã nộp.',true);});
   $('#exportStudents').onclick=exportStudents;$('#backupButton').onclick=$('#backupButtonTop').onclick=backup;$('#restoreButton').onclick=()=>$('#restoreFileInput').click();
   $('#clearDataButton').onclick=async()=>{if(confirm('Xóa toàn bộ dữ liệu học sinh, giao dịch và lịch sử trên trình duyệt này?')){await clearAll();await refresh();toast('Đã xóa dữ liệu trên máy này.');}};
   $('#menuToggle').onclick=()=>$('#sidebar').classList.toggle('open');
