@@ -250,7 +250,19 @@
       </section>
 
       <section class="page" id="page-history">
-        <div class="page-heading"><div><span class="eyebrow">NHẬT KÝ CẬP NHẬT</span><h1>Tra cứu & báo cáo</h1><p>Xem lịch sử nhập file và kết quả từng lần cập nhật dữ liệu.</p></div></div>
+        <div class="page-heading"><div><span class="eyebrow">TRA CỨU & XUẤT BÁO CÁO</span><h1>Tra cứu & báo cáo</h1><p>Xuất danh sách học sinh đã nộp theo lớp, học sinh và một hoặc nhiều khoản thu; đồng thời xem lịch sử cập nhật dữ liệu.</p></div></div>
+
+        <article class="panel paid-report-card">
+          <div class="panel-header"><div><h2>Danh sách học sinh đã nộp khoản thu</h2><p>Mẫu Excel gồm STT, họ tên, lớp, địa chỉ (thôn), CCCD, giới tính, ngày sinh, số tiền và ghi chú.</p></div><span class="mini-tag">XLSX</span></div>
+          <div class="receipt-filter-grid paid-report-grid">
+            <label class="qr-field"><span>Lớp</span><select id="paidReportClass"><option value="all">Tất cả lớp</option></select></label>
+            <label class="qr-field"><span>Học sinh</span><select id="paidReportStudent"><option value="all">Tất cả học sinh</option></select></label>
+            <label class="qr-field"><span>Điều kiện</span><select id="paidReportCondition"><option value="any">Có ít nhất 1 khoản đã nộp</option><option value="all">Đã nộp đủ tất cả khoản được chọn</option></select></label>
+            <label class="qr-field"><span>Cột ghi chú</span><select id="paidReportNoteMode"><option value="fees">Tên khoản đã nộp</option><option value="blank">Để trống</option></select></label>
+            <label class="qr-field paid-report-fees"><span>Khoản thu đã nộp</span><select id="paidReportFees" multiple size="6"><option value="all" selected>Tất cả khoản đã nộp</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Số tiền trong báo cáo là tổng các khoản đã chọn và đã thu thực tế.</small></label>
+          </div>
+          <div class="receipt-batch-actions paid-report-actions"><span id="paidReportSummary">Chưa có dữ liệu đã thu để lập báo cáo.</span><button class="button button-primary" id="exportPaidReport">↓ Xuất Excel danh sách đã nộp</button></div>
+        </article>
         <article class="panel table-panel"><div class="panel-header"><div><h2>Lịch sử nhập file</h2><p>Nhật ký chỉ lưu trên máy đang sử dụng</p></div></div><div class="table-wrap"><table><thead><tr><th>THỜI GIAN</th><th>LOẠI FILE</th><th>TÊN FILE</th><th>SỐ DÒNG</th><th>KẾT QUẢ</th></tr></thead><tbody id="historyTable"><tr><td colspan="5" class="empty-cell">Chưa có lịch sử nhập file.</td></tr></tbody></table></div></article>
       </section>
 
