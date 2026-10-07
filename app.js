@@ -1418,6 +1418,114 @@ async function exportClassFeeReport(){
   toast(`Đã xuất báo cáo Excel ${label}.`);
 }
 
+
+function paidReportFeeKey(item){
+  return item.catalogId?`catalog:${item.catalogId}`:`name:${slug(item.name)}`;
+}
+function paidReportSelectedFees(){
+  const values=selectedValues($('#paidReportFees'));
+  return !values.length||values.includes('all')?null:new Set(values);
+}
+function paidReportRows(students,transactions){
+  const paidKeys=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const cls=$('#paidReportClass')?.value||'all',studentCode=$('#paidReportStudent')?.value||'all';
+  const condition=$('#paidReportCondition')?.value||'any',selected=paidReportSelectedFees();
+  const rows=[];
+  for(const student of students){
+    if(cls!=='all'&&student.className!==cls)continue;
+    if(studentCode!=='all'&&student.code!==studentCode)continue;
+    const dueItems=studentDueItems(student).filter(item=>!selected||selected.has(paidReportFeeKey(item)));
+    if(!dueItems.length)continue;
+    if(condition==='all'&&selected&&new Set(dueItems.map(paidReportFeeKey)).size<selected.size)continue;
+    const paidItems=dueItems.filter(item=>paidKeys.has(`${student.code}|${item.id}`));
+    const include=condition==='all'?paidItems.length===dueItems.length:paidItems.length>0;
+    if(!include)continue;
+    rows.push({
+      student,
+      paidItems,
+      amount:paidItems.reduce((sum,item)=>sum+num(item.amount),0),
+      note:paidItems.map(item=>item.name).join('; ')
+    });
+  }
+  return rows.sort((a,b)=>(a.student.className||'').localeCompare(b.student.className||'','vi',{numeric:true,sensitivity:'base'})||a.student.name.localeCompare(b.student.name,'vi'));
+}
+function populatePaidReportControls(students,catalog,transactions){
+  const classEl=$('#paidReportClass'),studentEl=$('#paidReportStudent'),feeEl=$('#paidReportFees');if(!classEl)return;
+  const currentClass=classEl.value||'all',currentStudent=studentEl.value||'all',selected=new Set(selectedValues(feeEl));
+  const classes=[...new Set(students.map(s=>s.className).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true,sensitivity:'base'}));
+  classEl.innerHTML='<option value="all">Tất cả lớp</option>'+classes.map(v=>`<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join('');
+  classEl.value=classes.includes(currentClass)?currentClass:'all';
+  const scoped=students.filter(s=>classEl.value==='all'||s.className===classEl.value).sort((a,b)=>(a.className||'').localeCompare(b.className||'','vi',{numeric:true})||a.name.localeCompare(b.name,'vi'));
+  studentEl.innerHTML='<option value="all">Tất cả học sinh</option>'+scoped.map(s=>`<option value="${escapeHTML(s.code)}">${escapeHTML(s.className||'')} · ${escapeHTML(s.name)}</option>`).join('');
+  studentEl.value=scoped.some(s=>s.code===currentStudent)?currentStudent:'all';
+
+  const paidSet=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const feeMap=new Map();
+  students.forEach(student=>studentDueItems(student).forEach(item=>{
+    if(!paidSet.has(`${student.code}|${item.id}`))return;
+    const key=paidReportFeeKey(item);if(!feeMap.has(key))feeMap.set(key,item);
+  }));
+  feeEl.innerHTML='<option value="all">Tất cả khoản đã nộp</option>'+[...feeMap.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name,'vi')).map(([key,item])=>`<option value="${escapeHTML(key)}">${escapeHTML(item.name)} · ${money(item.amount)}</option>`).join('');
+  const kept=[...feeEl.options].filter(o=>selected.has(o.value)&&o.value!=='all');
+  if(kept.length)kept.forEach(o=>o.selected=true);else feeEl.options[0].selected=true;
+}
+function updatePaidReportSummary(students,transactions){
+  const rows=paidReportRows(students,transactions),amount=rows.reduce((sum,row)=>sum+row.amount,0);
+  const el=$('#paidReportSummary');if(el)el.textContent=rows.length?`${rows.length.toLocaleString('vi-VN')} học sinh · tổng đã nộp ${money(amount)}`:'Không có học sinh phù hợp điều kiện đã chọn.';
+  return rows;
+}
+async function renderPaidReportTool(students,transactions,catalog){
+  populatePaidReportControls(students,catalog,transactions);updatePaidReportSummary(students,transactions);
+}
+async function exportPaidReport(){
+  if(typeof JSZip==='undefined')return toast('Thiếu thư viện xuất Excel. Hãy tải lại trang.',true);
+  const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);
+  const transactions=reconcileTransactions(students,stored);
+  const rows=paidReportRows(students,transactions);
+  if(!rows.length)return toast('Không có học sinh đã nộp phù hợp điều kiện để xuất.',true);
+
+  const selected=paidReportSelectedFees();
+  const selectedLabels=selected?[...selected].map(key=>{
+    if(key.startsWith('catalog:'))return catalog.find(f=>f.id===key.slice(8))?.name||'Khoản thu';
+    const item=rows.flatMap(r=>r.paidItems).find(i=>paidReportFeeKey(i)===key);return item?.name||'Khoản thu';
+  }):['Tất cả khoản đã nộp'];
+  const classValue=$('#paidReportClass').value||'all',studentValue=$('#paidReportStudent').value||'all';
+  const scopeLabel=studentValue!=='all'?(rows[0]?.student.name||'Học sinh'):(classValue==='all'?'Toàn trường':`Lớp ${classValue}`);
+  const noteMode=$('#paidReportNoteMode').value||'fees';
+
+  const zip=new JSZip();
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
+  zip.folder('_rels').file('.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  zip.folder('xl').file('workbook.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Danh sách đã nộp" sheetId="1" r:id="rId1"/></sheets></workbook>');
+  zip.folder('xl').folder('_rels').file('workbook.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  zip.folder('xl').file('styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="11"/><name val="Times New Roman"/></font><font><b/><sz val="14"/><name val="Times New Roman"/></font><font><b/><sz val="16"/><name val="Times New Roman"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE7F3F0"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF078778"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FF9BB8B2"/></left><right style="thin"><color rgb="FF9BB8B2"/></right><top style="thin"><color rgb="FF9BB8B2"/></top><bottom style="thin"><color rgb="FF9BB8B2"/></bottom></border></borders><cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment vertical="center"/></xf><xf numFmtId="3" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf><xf numFmtId="0" fontId="3" fillId="3" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs></styleSheet>');
+
+  const sheetRows=[];
+  sheetRows.push(excelRow(1,[{v:'UBND XÃ HIẾU GIANG',s:1}],22));
+  sheetRows.push(excelRow(2,[{v:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',s:1}],22));
+  sheetRows.push(excelRow(4,[{v:'DANH SÁCH HỌC SINH ĐÃ NỘP KHOẢN THU',s:2}],28));
+  sheetRows.push(excelRow(5,[{v:`Phạm vi: ${scopeLabel} · Khoản thu: ${selectedLabels.join(' + ')}`,s:1}],22));
+  sheetRows.push(excelRow(7,['STT','HỌ TÊN','LỚP','ĐỊA CHỈ (THÔN)','SỐ CCCD','GIỚI TÍNH','NGÀY/THÁNG/NĂM SINH','SỐ TIỀN','GHI CHÚ'].map(v=>({v,s:3})),34));
+  rows.forEach((row,index)=>{
+    const s=row.student;
+    const note=noteMode==='blank'?'':row.note;
+    sheetRows.push(excelRow(index+8,[
+      {v:index+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate||'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}
+    ],22));
+  });
+  const totalRow=rows.length+8;
+  sheetRows.push(excelRow(totalRow,[{v:'',s:4},{v:'TỔNG CỘNG',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:rows.reduce((sum,r)=>sum+r.amount,0),t:'n',s:5},{v:'',s:3}],24));
+
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="7" topLeftCell="A8" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="7" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="20" customWidth="1"/><col min="5" max="5" width="19" customWidth="1"/><col min="6" max="6" width="12" customWidth="1"/><col min="7" max="7" width="20" customWidth="1"/><col min="8" max="8" width="16" customWidth="1"/><col min="9" max="9" width="34" customWidth="1"/></cols><sheetData>${sheetRows.join('')}</sheetData><autoFilter ref="A7:I${rows.length+7}"/><mergeCells count="5"><mergeCell ref="A1:D1"/><mergeCell ref="A2:D2"/><mergeCell ref="A4:I4"/><mergeCell ref="A5:I5"/><mergeCell ref="B${totalRow}:G${totalRow}"/></mergeCells></worksheet>`;
+  zip.folder('xl').folder('worksheets').file('sheet1.xml',sheet);
+
+  const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const feeName=selectedLabels.length===1?selectedLabels[0]:'Nhieu-khoan',className=classValue==='all'?'Toan-truong':classValue;
+  const filename=`Danh-sach-da-nop-${feeSafeCode(className,20)}-${feeSafeCode(feeName,28)}.xlsx`;
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
+  toast(`Đã xuất ${rows.length} học sinh đã nộp.`);
+}
+
 function exportStudents() {
   Promise.all([all('students'),all('transactions')]).then(([items,stored])=>{
     const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
