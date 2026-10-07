@@ -203,8 +203,38 @@
           <div class="receipt-config-actions"><span>Không chèn ảnh chữ ký. Chứng từ chỉ hiển thị họ tên người ký khi đã cấu hình.</span><button class="button button-primary" id="saveReceiptConfig">Lưu cấu hình</button></div>
         </article>
 
+        <article class="panel cash-session-card">
+          <div class="panel-header"><div><h2>⚡ Thu tiền mặt nhanh theo phiên</h2><p>Tick các khoản thực nhận, kiểm đếm tiền thực tế và chỉ đồng bộ vào dữ liệu thu chung sau khi thủ quỹ xác nhận khớp.</p></div><span class="category-badge service">CHƯA ĐỒNG BỘ</span></div>
+          <div class="cash-session-toolbar">
+            <label class="qr-field"><span>Lớp</span><select id="cashSessionClass"><option value="">— Chọn lớp —</option></select></label>
+            <label class="qr-field"><span>Tìm học sinh</span><input id="cashSessionSearch" type="search" placeholder="Nhập tên hoặc mã học sinh"></label>
+            <label class="qr-field"><span>Ngày thu</span><input id="cashSessionDate" type="date"></label>
+            <label class="qr-field"><span>Thủ quỹ</span><input id="cashSessionCashier" maxlength="80" placeholder="Họ và tên thủ quỹ"></label>
+          </div>
+          <div class="cash-session-stats">
+            <div><span>Học sinh đã chọn</span><strong id="cashSessionStudentCount">0</strong></div>
+            <div><span>Số khoản đã chọn</span><strong id="cashSessionItemCount">0</strong></div>
+            <div><span>Tổng theo sổ</span><strong id="cashSessionExpected">0 ₫</strong></div>
+            <div><span>Tiền thực tế</span><strong id="cashSessionActualLabel">0 ₫</strong></div>
+            <div><span>Chênh lệch</span><strong id="cashSessionDifference">0 ₫</strong></div>
+          </div>
+          <div class="cash-session-table-wrap">
+            <table class="cash-session-table"><thead id="cashSessionHead"><tr><th>STT</th><th>HỌC SINH</th><th>LỚP</th><th>Chọn lớp để bắt đầu</th></tr></thead><tbody id="cashSessionBody"><tr><td colspan="4" class="empty-cell">Chọn lớp để hiển thị danh sách thu nhanh.</td></tr></tbody></table>
+          </div>
+          <div class="cash-session-check">
+            <label class="qr-field"><span>Tiền thực tế thủ quỹ kiểm đếm</span><input id="cashSessionActual" inputmode="numeric" placeholder="Nhập số tiền thực tế"></label>
+            <div class="cash-session-status" id="cashSessionStatus">Chưa có khoản được chọn.</div>
+          </div>
+          <div class="receipt-batch-actions cash-session-actions">
+            <span>Phiên chưa xác nhận không được tính vào số thu chung.</span>
+            <button class="button button-outline" id="exportCashSession">↓ Xuất bảng kê phiên</button>
+            <button class="button button-outline" id="clearCashSession">Hủy lựa chọn</button>
+            <button class="button button-primary" id="confirmCashSession" disabled>✓ Xác nhận số thu & đồng bộ</button>
+          </div>
+        </article>
+
         <article class="panel cash-entry-card">
-          <div class="panel-header"><div><h2>Ghi nhận thu tiền mặt</h2><p>Chọn đúng học sinh và món chưa thu. Khoản tiền mặt được lưu riêng và không bị mất khi cập nhật báo cáo ngân hàng.</p></div><span class="category-badge service">TIỀN MẶT</span></div>
+          <div class="panel-header"><div><h2>Thêm nhanh một khoản vào phiên</h2><p>Dùng khi cần tìm từng học sinh. Khoản chọn sẽ đưa vào phiên tiền mặt phía trên, chưa đồng bộ ngay.</p></div><span class="category-badge service">THÊM VÀO PHIÊN</span></div>
           <div class="cash-entry-grid">
             <label class="qr-field"><span>Lớp</span><select id="cashClass"><option value="">— Chọn lớp —</option></select></label>
             <label class="qr-field"><span>Học sinh</span><select id="cashStudent"><option value="">— Chọn học sinh —</option></select></label>
@@ -215,7 +245,7 @@
             <label class="qr-field qr-field-wide"><span>Lý do / ghi chú</span><input id="cashNote" maxlength="180" placeholder="Ví dụ: Nộp Bảo hiểm thân thể cho học sinh"></label>
           </div>
           <div class="cash-entry-preview" id="cashEntryPreview">Chọn học sinh và khoản thu để ghi nhận tiền mặt.</div>
-          <div class="receipt-batch-actions"><span>Hiện tại chỉ ghi nhận đủ 100% số tiền của từng món để bảo đảm đối soát một-món/một-giao-dịch.</span><button class="button button-outline" id="recordCashPayment">Ghi nhận tiền mặt</button><button class="button button-primary" id="recordAndPrintCash">Ghi nhận & In phiếu thu</button></div>
+          <div class="receipt-batch-actions"><span>Khoản này chỉ được thêm vào phiên chờ kiểm đếm, chưa tính vào số thu chung.</span><button class="button button-primary" id="recordCashPayment">+ Thêm vào phiên tiền mặt</button><button class="button button-outline" id="recordAndPrintCash" style="display:none">Ẩn</button></div>
         </article>
 
         <article class="panel receipt-filter-card">
