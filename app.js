@@ -281,7 +281,7 @@ async function importCashierFile(file){
     }
   }
   draft.selections=[...selMap.values()];
-  if(classes.size===1)draft.className=[...classes][0];
+  draft.className=classes.size===1?[...classes][0]:'';
   if(dates.length)draft.date=dates.sort().at(-1);
   draft.sourceFile=file.name;draft.sourceSheet=parsed.sheetName;draft.actual=0;
   await saveCashSessionDraft(draft);
@@ -1252,7 +1252,7 @@ async function confirmCashSession(){
   const cashTxs=finalSelections.map((x,i)=>({
     id:`cash:${draft.sessionId}:${x.student.code}:${x.item.id}`,
     ref:`${draft.sessionId}-${String(i+1).padStart(3,'0')}`,
-    date,content:`Thu tiền mặt ${x.item.name}`,amount:x.item.amount,feeCategory:x.item.category,feeDetail:x.item.name,
+    date:x.paymentDate||date,content:`Thu tiền mặt ${x.item.name}`,amount:x.item.amount,feeCategory:x.item.category,feeDetail:x.item.name,
     reportedStudentCode:x.student.code,reportedPaymentCode:x.item.paymentCode||x.student.code,bankStatus:'thanh cong',
     studentCode:x.student.code,studentName:x.student.name,sourceFile:`Phiên tiền mặt ${draft.sessionId}`,importedAt:now,matched:true,
     sourceType:'cash',paymentChannel:'cash',manualDueItemId:x.item.id,payerName:'Nộp trực tiếp tại thủ quỹ',cashSessionId:draft.sessionId,cashier,confirmedAt:now
@@ -1608,7 +1608,7 @@ async function handleReceiptTableClick(e){
 }
 
 async function refresh() {
-  const [students,storedTransactions,history,qrConfig,noticeBundles,cashBankReview]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount'),getNoticeBundles(),request('meta','get','cashBankReview')]);
+  const [students,storedTransactions,history,qrConfig,noticeBundles,cashBankReview,cashierImportReview]=await Promise.all([all('students'),all('transactions'),all('history'),request('meta','get','qrAccount'),getNoticeBundles(),request('meta','get','cashBankReview'),request('meta','get','cashierImportReview')]);
   setNoticeBundleCache(noticeBundles);
   const transactions=reconcileTransactions(students,storedTransactions);
   const priorById=new Map(storedTransactions.map(t=>[t.id,t]));
@@ -1630,6 +1630,11 @@ async function refresh() {
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
   ['matchedTxnCount','importsMatchedTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.filter(x=>x.paymentStatus==='valid').length;});
   ['unmatchedTxnCount','importsUnmatchedTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.filter(x=>x.paymentStatus!=='valid').length;});
+  if(cashierImportReview){
+    const text=`${cashierImportReview.fileName} · sheet ${cashierImportReview.sheetName} · ${cashierImportReview.added||0} khoản vào phiên · ${(cashierImportReview.duplicates||[]).length} trùng bỏ qua · ${(cashierImportReview.unmatched||[]).length} chưa ghép · ${(cashierImportReview.amountWarnings||[]).length} cảnh báo`;
+    if($('#cashierFileSummary'))$('#cashierFileSummary').textContent=text;
+    if($('#cashierLastImport'))$('#cashierLastImport').textContent=text;
+  }
   if($('#cashBankConflictList')){
     const warnings=cashBankReview?.warnings||[];
     $('#cashBankConflictCount').textContent=`${warnings.length} cảnh báo`;
@@ -1858,8 +1863,10 @@ function wire() {
   $$('[data-go]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.go)));
   $('#studentImportButton').onclick=$('#studentImportButton2').onclick=()=>$('#studentFileInput').click();
   $('#bankImportButton').onclick=()=>$('#bankFileInput').click();
+  $('#cashierFileImportButton').onclick=$('#cashierFileImportButton2').onclick=()=>$('#cashierFileInput').click();
   $('#studentFileInput').onchange=e=>{chooseFile('students',e.target.files[0]);e.target.value='';};
   $('#bankFileInput').onchange=e=>{chooseFile('bank',e.target.files[0]);e.target.value='';};
+  $('#cashierFileInput').onchange=e=>{importCashierFile(e.target.files[0]).catch(err=>{console.error(err);toast(err.message||'Không đọc được file thủ quỹ.',true);});e.target.value='';};
   $('#restoreFileInput').onchange=e=>{restore(e.target.files[0]);e.target.value='';};
   $('#modalClose').onclick=$('#modalCancel').onclick=closeModal;$('#modalConfirm').onclick=confirmImport;
   $('#modalBackdrop').addEventListener('click',e=>{if(e.target.id==='modalBackdrop')closeModal();});
