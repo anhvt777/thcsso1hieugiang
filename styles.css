@@ -138,3 +138,5 @@
 .cash-bank-review-card{padding:18px;margin-bottom:16px}.cash-bank-conflict-list{display:grid;gap:7px}.cash-bank-conflict-item{display:grid;grid-template-columns:28px 1fr;gap:9px;align-items:start;padding:10px;border:1px solid #f0d3cf;background:#fff6f4;border-radius:9px;font-size:10px;color:#79413d}.cash-bank-conflict-item b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#c94c43;color:#fff}.warning-tag{background:#fff0ed!important;color:#b4433e!important}
 @media(max-width:1100px){.cash-session-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.cash-session-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.cash-session-toolbar{grid-template-columns:1fr}.cash-session-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cash-session-check{grid-template-columns:1fr}}
+
+.cashier-file-summary{margin-top:10px;padding:10px 12px;border-radius:9px;background:#f5f8f7;border:1px solid #dde7e4;font-size:9px;color:#667572;line-height:1.45}
