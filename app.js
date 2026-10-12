@@ -1144,6 +1144,13 @@ async function renderCashSession(students,transactions){
   classEl.innerHTML='<option value="">— Chọn lớp —</option>'+classes.map(v=>`<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`).join('');
   if(classes.includes(currentClass))classEl.value=currentClass;
   $('#cashSessionDate').value=draft.date||new Date().toISOString().slice(0,10);
+  const importedDates=[...new Set((draft.selections||[]).map(x=>x.paymentDate).filter(Boolean))];
+  const dateInput=$('#cashSessionDate');
+  if(dateInput){
+    dateInput.title=importedDates.length
+      ? `Ngày này chỉ áp dụng cho khoản tick thủ công. File thủ quỹ đang có ${importedDates.length} ngày nộp riêng và báo cáo sẽ giữ đúng từng ngày.`
+      : 'Ngày thu mặc định cho các khoản tick thủ công.';
+  }
   $('#cashSessionCashier').value=draft.cashier||'';
   $('#cashSessionActual').value=draft.actual?new Intl.NumberFormat('vi-VN').format(draft.actual):'';
 
@@ -1228,12 +1235,19 @@ async function clearCashSession(){
 async function exportCashSession(){
   const [students,stored]=await Promise.all([all('students'),all('transactions')]),tx=reconcileTransactions(students,stored),draft=await getCashSessionDraft(),stats=cashSessionDraftStats(draft,students,tx);
   if(!stats.itemCount)return toast('Chưa có khoản nào trong phiên để xuất.',true);
-  const headers=['STT','Họ tên','Lớp','Mã học sinh','Khoản thu','Số tiền','Ngày thu','Thủ quỹ','Trạng thái'];
-  const lines=stats.validSelections.map((x,i)=>[i+1,x.student.name,x.student.className,x.student.code,x.item.name,x.item.amount,draft.date,draft.cashier,'Chờ xác nhận'].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
-  lines.push(['','','','','TỔNG THEO SỔ',stats.amount,'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
-  lines.push(['','','','','TIỀN THỰC TẾ',parseMoneyInput($('#cashSessionActual').value),'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
-  lines.push(['','','','','CHÊNH LỆCH',parseMoneyInput($('#cashSessionActual').value)-stats.amount,'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
-  download(`bang-ke-phien-tien-mat-${draft.className||'lop'}-${draft.date||'ngay'}.csv`,'\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
+  const headers=['STT','Họ tên','Lớp','Mã học sinh','Ngày sinh','Khoản thu','Số tiền','Ngày thu','Thủ quỹ','Trạng thái'];
+  const lines=stats.validSelections.map((x,i)=>{
+    const paymentDate=x.paymentDate||draft.date||'';
+    const birthDate=normalizeDate(x.student.birthDate||'');
+    return [i+1,x.student.name,x.student.className,x.student.code,noticeDateVi(birthDate),x.item.name,x.item.amount,noticeDateVi(paymentDate),draft.cashier,'Chờ xác nhận']
+      .map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');
+  });
+  lines.push(['','','','','','TỔNG THEO SỔ',stats.amount,'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
+  lines.push(['','','','','','TIỀN THỰC TẾ',parseMoneyInput($('#cashSessionActual').value),'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
+  lines.push(['','','','','','CHÊNH LỆCH',parseMoneyInput($('#cashSessionActual').value)-stats.amount,'','',''].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
+  const dateSet=[...new Set(stats.validSelections.map(x=>x.paymentDate||draft.date).filter(Boolean))];
+  const datePart=dateSet.length===1?dateSet[0]:'nhieu-ngay';
+  download(`bang-ke-phien-tien-mat-${draft.className||'lop'}-${datePart||'ngay'}.csv`,'\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
 }
 async function confirmCashSession(){
   const [students,stored]=await Promise.all([all('students'),all('transactions')]),tx=reconcileTransactions(students,stored),draft=await getCashSessionDraft(),stats=cashSessionDraftStats(draft,students,tx);
