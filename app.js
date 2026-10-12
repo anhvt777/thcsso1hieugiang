@@ -151,6 +151,149 @@ async function parseXlsx(file) {
   normalizedRows.headerRow=(chosen.headerIndex||0)+1;
   return normalizedRows;
 }
+
+async function readCashierWorkbook(file){
+  if(!file||!file.name.toLowerCase().endsWith('.xlsx'))throw new Error('File thủ quỹ cần là Excel .xlsx.');
+  const bytes=new Uint8Array(await file.arrayBuffer()),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  let eocd=-1;for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65558);i--){if(view.getUint32(i,true)===0x06054b50){eocd=i;break;}}
+  if(eocd<0)throw new Error('Không tìm thấy cấu trúc XLSX trong file thủ quỹ.');
+  const count=view.getUint16(eocd+10,true),cdOffset=view.getUint32(eocd+16,true),entries=new Map();let p=cdOffset;
+  for(let i=0;i<count;i++){
+    if(view.getUint32(p,true)!==0x02014b50)break;
+    const method=view.getUint16(p+10,true),compressedSize=view.getUint32(p+20,true),nameLength=view.getUint16(p+28,true),extraLength=view.getUint16(p+30,true),commentLength=view.getUint16(p+32,true),localOffset=view.getUint32(p+42,true);
+    const name=new TextDecoder().decode(bytes.slice(p+46,p+46+nameLength));entries.set(name,{method,compressedSize,localOffset});p+=46+nameLength+extraLength+commentLength;
+  }
+  const getText=async name=>entries.has(name)?new TextDecoder().decode(await readZipEntry(bytes,entries.get(name))):'';
+  const workbook=new DOMParser().parseFromString(await getText('xl/workbook.xml'),'application/xml');
+  const relations=new DOMParser().parseFromString(await getText('xl/_rels/workbook.xml.rels'),'application/xml');
+  const sharedXml=await getText('xl/sharedStrings.xml'),sharedDoc=sharedXml?new DOMParser().parseFromString(sharedXml,'application/xml'):null;
+  const shared=sharedDoc?[...sharedDoc.querySelectorAll('si')].map(si=>[...si.querySelectorAll('t')].map(t=>t.textContent).join('')):[];
+  const sheets=[];
+  for(const sheetNode of workbook.querySelectorAll('sheet')){
+    const relId=sheetNode.getAttribute('r:id'),rel=[...relations.querySelectorAll('Relationship')].find(node=>node.getAttribute('Id')===relId);
+    const target=rel?.getAttribute('Target')||'worksheets/sheet1.xml',sheetPath=target.startsWith('/')?target.slice(1):`xl/${target.replace(/^\.\//,'')}`;
+    const sheetXml=await getText(sheetPath);if(!sheetXml)continue;
+    const doc=new DOMParser().parseFromString(sheetXml,'application/xml');
+    const rows=[...doc.querySelectorAll('sheetData row')].map(rowNode=>{
+      const cells=[];
+      for(const cell of rowNode.querySelectorAll(':scope > c')){
+        const ref=cell.getAttribute('r')||'',col=(ref.match(/[A-Z]+/)||['A'])[0];let index=0;for(const ch of col)index=index*26+ch.charCodeAt(0)-64;index--;
+        const type=cell.getAttribute('t');let val=cell.querySelector('v')?.textContent??'';
+        if(type==='s')val=shared[Number(val)]??'';else if(type==='inlineStr')val=[...cell.querySelectorAll('is t')].map(t=>t.textContent).join('');
+        cells[index]=val;
+      }
+      return cells.map(v=>v??'');
+    });
+    let bestHeaderIndex=0,bestScore=-1;
+    rows.slice(0,25).forEach((row,index)=>{
+      const hs=(row||[]).map(slug);
+      let score=0;
+      if(hs.some(h=>h==='ho ten'||h==='ho va ten'))score+=5;
+      if(hs.some(h=>h==='lop'))score+=4;
+      if(hs.some(h=>/sdd ca nhan|cccd|so dinh danh/.test(h)))score+=4;
+      if(hs.some(h=>/ngay nop/.test(h)))score+=3;
+      if(hs.some(h=>h==='bhyt'||h.includes('bao hiem y te')))score+=7;
+      if(hs.some(h=>h==='bhtt'||h.includes('bao hiem than the')))score+=7;
+      if(hs.some(h=>/tong nop/.test(h)))score+=2;
+      if(score>bestScore){bestScore=score;bestHeaderIndex=index;}
+    });
+    const header=(rows[bestHeaderIndex]||[]).map(String),norm=header.map(slug),hasBhyt=norm.some(h=>h==='bhyt'||h.includes('bao hiem y te')),hasBhtt=norm.some(h=>h==='bhtt'||h.includes('bao hiem than the'));
+    const dataRows=rows.slice(bestHeaderIndex+1).filter(row=>row.some(v=>String(v??'').trim()));
+    sheets.push({name:sheetNode.getAttribute('name')||'Trang tính',rows,headerIndex:bestHeaderIndex,header,score:bestScore+(hasBhyt&&hasBhtt?30:0),hasBhyt,hasBhtt,dataRows});
+  }
+  const chosen=sheets.sort((a,b)=>b.score-a.score||b.dataRows.length-a.dataRows.length)[0];
+  if(!chosen)throw new Error('Không tìm thấy sheet dữ liệu thủ quỹ.');
+  if(!chosen.hasBhyt&&!chosen.hasBhtt)throw new Error('Không tìm thấy cột BHYT/BHTT trong file thủ quỹ.');
+  return {sheetName:chosen.name,header:chosen.header,rows:chosen.dataRows,allSheets:sheets.map(s=>s.name)};
+}
+function cashierColumnIndex(headers,patterns){
+  const hs=headers.map(slug);
+  for(const p of patterns){const i=hs.indexOf(p);if(i>=0)return i;}
+  for(const p of patterns){const i=hs.findIndex(h=>h&&(h.includes(p)||p.includes(h)));if(i>=0)return i;}
+  return -1;
+}
+function normalizeCashierAmount(raw,expected){
+  const parsed=parseAmount(raw);if(!parsed)return 0;
+  const candidates=[parsed,Math.round(parsed*10),Math.round(parsed*100),Math.round(parsed*1000)];
+  if(expected){
+    const exact=candidates.find(v=>v===num(expected));if(exact!==undefined)return exact;
+    return candidates.sort((a,b)=>Math.abs(a-expected)-Math.abs(b-expected))[0];
+  }
+  return parsed<10000?parsed*1000:parsed;
+}
+function cashierStudentIndexes(students){
+  const byPersonal=new Map(),byNameClassBirth=new Map(),byNameClass=new Map();
+  students.forEach(s=>{
+    const pid=String(s.personalId||'').replace(/\D/g,'');if(pid)byPersonal.set(pid,s);
+    const ncb=slug(`${s.name||''}|${s.className||''}|${normalizeDate(s.birthDate||'')}`);if(ncb)byNameClassBirth.set(ncb,s);
+    const nc=slug(`${s.name||''}|${s.className||''}`);if(nc)byNameClass.set(nc,s);
+  });
+  return {byPersonal,byNameClassBirth,byNameClass};
+}
+function matchCashierStudent(row,map,indexes){
+  const pid=String(row[map.personalId]??'').replace(/\D/g,''),name=String(row[map.name]??'').trim(),className=String(row[map.className]??'').trim(),birth=normalizeDate(String(row[map.birthDate]??'').trim());
+  if(pid&&indexes.byPersonal.has(pid))return {student:indexes.byPersonal.get(pid),matchedBy:'personal_id'};
+  const ncb=slug(`${name}|${className}|${birth}`);if(name&&className&&birth&&indexes.byNameClassBirth.has(ncb))return {student:indexes.byNameClassBirth.get(ncb),matchedBy:'name_class_birth'};
+  const nc=slug(`${name}|${className}`);if(name&&className&&indexes.byNameClass.has(nc))return {student:indexes.byNameClass.get(nc),matchedBy:'name_class'};
+  return {student:null,matchedBy:'unmatched'};
+}
+function cashierFeeItem(student,category){
+  const items=studentDueItems(student).filter(x=>x.category===category&&!x.legacy&&x.amount>0);
+  return items.length===1?items[0]:null;
+}
+async function importCashierFile(file){
+  const parsed=await readCashierWorkbook(file),headers=parsed.header;
+  const map={
+    name:cashierColumnIndex(headers,['ho ten','ho va ten']),
+    className:cashierColumnIndex(headers,['lop']),
+    birthDate:cashierColumnIndex(headers,['ngay thang nam sinh','ngay sinh']),
+    personalId:cashierColumnIndex(headers,['sdd ca nhan','so dinh danh ca nhan','cccd']),
+    paymentDate:cashierColumnIndex(headers,['ngay nop']),
+    bhyt:cashierColumnIndex(headers,['bhyt','bao hiem y te']),
+    bhtt:cashierColumnIndex(headers,['bhtt','bao hiem than the','so tien']),
+    note:cashierColumnIndex(headers,['ghi chu'])
+  };
+  if(map.name<0||map.className<0)return toast('File thủ quỹ thiếu cột Họ tên hoặc Lớp.',true);
+  if(map.bhyt<0&&map.bhtt<0)return toast('File thủ quỹ không có cột BHYT/BHTT.',true);
+
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]),tx=reconcileTransactions(students,stored),paidMap=confirmedPaymentMap(tx),indexes=cashierStudentIndexes(students),draft=await getCashSessionDraft(),selMap=cashSessionSelectionMap(draft);
+  const unmatched=[],duplicates=[],amountWarnings=[],added=[],dates=[],classes=new Set();
+  for(let i=0;i<parsed.rows.length;i++){
+    const row=parsed.rows[i];if(!row||!row.some(v=>String(v??'').trim()))continue;
+    const match=matchCashierStudent(row,map,indexes);
+    if(!match.student){unmatched.push(`Dòng ${i+2}: ${String(row[map.name]||'').trim()} · ${String(row[map.className]||'').trim()}`);continue;}
+    const student=match.student;classes.add(student.className);
+    const payDate=map.paymentDate>=0?normalizeDate(String(row[map.paymentDate]??'').trim()):'';if(payDate)dates.push(payDate);
+    for(const fee of [{field:'bhyt',category:'insurance',label:'BHYT'},{field:'bhtt',category:'mandatory',label:'BHTT'}]){
+      if(map[fee.field]<0)continue;
+      const raw=row[map[fee.field]],rawNum=Number(String(raw??'').replace(',','.'));if(!rawNum||rawNum<=0)continue;
+      const item=cashierFeeItem(student,fee.category);
+      if(!item){amountWarnings.push(`${student.name}: không xác định duy nhất khoản ${fee.label} trên web`);continue;}
+      const amount=normalizeCashierAmount(raw,item.amount);
+      if(amount!==item.amount){amountWarnings.push(`${student.name}: ${fee.label} file ${raw} ≠ mức web ${money(item.amount)}`);continue;}
+      const key=cashSessionKey(student.code,item.id);
+      if(paidMap.has(key)){duplicates.push(`${student.name} · ${item.name} đã có ${paidMap.get(key).sourceType==='cash'?'tiền mặt':'BIDV'}`);continue;}
+      if(!selMap.has(key)){
+        const note=map.note>=0?String(row[map.note]??'').trim():'';
+        selMap.set(key,{studentCode:student.code,itemId:item.id,selectedAt:new Date().toISOString(),source:'cashier_file',sourceFile:file.name,sourceSheet:parsed.sheetName,paymentDate:payDate,note});
+        added.push({student,item,payDate});
+      }
+    }
+  }
+  draft.selections=[...selMap.values()];
+  if(classes.size===1)draft.className=[...classes][0];
+  if(dates.length)draft.date=dates.sort().at(-1);
+  draft.sourceFile=file.name;draft.sourceSheet=parsed.sheetName;draft.actual=0;
+  await saveCashSessionDraft(draft);
+  await request('meta','put',{key:'cashierImportReview',fileName:file.name,sheetName:parsed.sheetName,at:new Date().toISOString(),added:added.length,unmatched,duplicates,amountWarnings});
+  await request('history','put',{id:crypto.randomUUID(),kind:'File thủ quỹ',fileName:file.name,rows:parsed.rows.length,imported:added.length,detail:`${added.length} khoản đưa vào phiên chờ xác nhận · ${duplicates.length} trùng đã bỏ qua · ${unmatched.length} học sinh chưa ghép · ${amountWarnings.length} cảnh báo số tiền`,at:new Date().toISOString()});
+  const summary=`${file.name} · sheet ${parsed.sheetName} · thêm ${added.length} khoản vào phiên · bỏ qua ${duplicates.length} trùng · ${unmatched.length} chưa ghép · ${amountWarnings.length} cảnh báo`;
+  if($('#cashierFileSummary'))$('#cashierFileSummary').textContent=summary;
+  if($('#cashierLastImport'))$('#cashierLastImport').textContent=summary;
+  if($('#cashSessionActual'))$('#cashSessionActual').value='';
+  await refresh();
+  toast(summary,unmatched.length>0||amountWarnings.length>0);
+}
 async function readRows(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'xlsx') return parseXlsx(file);
