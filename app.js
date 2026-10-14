@@ -1757,6 +1757,25 @@ async function exportClassFeeReport(){
 }
 
 
+function paidReportDateRange(){
+  const from=$('#paidReportFromDate')?.value||'',to=$('#paidReportToDate')?.value||'';
+  return {from,to};
+}
+function paidReportTxnDate(t){return normalizeDate(String(t.date||t.paymentDate||t.confirmedAt||t.importedAt||'').trim());}
+function paidReportTxnInRange(t,range){
+  const d=paidReportTxnDate(t);
+  if(!d)return !range.from&&!range.to;
+  if(range.from&&d<range.from)return false;
+  if(range.to&&d>range.to)return false;
+  return true;
+}
+function paidReportTransactionMap(transactions){
+  const range=paidReportDateRange(),map=new Map();
+  transactions.filter(t=>t.paymentStatus==='valid'&&paidReportTxnInRange(t,range)).forEach(t=>{
+    transactionMatchedItemIds(t).forEach(id=>map.set(cashSessionKey(t.studentCode,id),t));
+  });
+  return map;
+}
 function paidReportFeeKey(item){
   return item.catalogId?`catalog:${item.catalogId}`:`name:${slug(item.name)}`;
 }
@@ -1765,7 +1784,7 @@ function paidReportSelectedFees(){
   return !values.length||values.includes('all')?null:new Set(values);
 }
 function paidReportRows(students,transactions){
-  const paidKeys=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidTxnMap=paidReportTransactionMap(transactions);
   const cls=$('#paidReportClass')?.value||'all',studentCode=$('#paidReportStudent')?.value||'all';
   const condition=$('#paidReportCondition')?.value||'any',selected=paidReportSelectedFees();
   const rows=[];
@@ -1775,12 +1794,14 @@ function paidReportRows(students,transactions){
     const dueItems=studentDueItems(student).filter(item=>!selected||selected.has(paidReportFeeKey(item)));
     if(!dueItems.length)continue;
     if(condition==='all'&&selected&&new Set(dueItems.map(paidReportFeeKey)).size<selected.size)continue;
-    const paidItems=dueItems.filter(item=>paidKeys.has(`${student.code}|${item.id}`));
+    const paidItems=dueItems.filter(item=>paidTxnMap.has(cashSessionKey(student.code,item.id)));
     const include=condition==='all'?paidItems.length===dueItems.length:paidItems.length>0;
     if(!include)continue;
+    const paymentDates=paidItems.map(item=>paidReportTxnDate(paidTxnMap.get(cashSessionKey(student.code,item.id)))).filter(Boolean);
     rows.push({
       student,
       paidItems,
+      paymentDates,
       amount:paidItems.reduce((sum,item)=>sum+num(item.amount),0),
       note:paidItems.map(item=>item.name).join('; ')
     });
@@ -1797,10 +1818,10 @@ function populatePaidReportControls(students,catalog,transactions){
   studentEl.innerHTML='<option value="all">Tất cả học sinh</option>'+scoped.map(s=>`<option value="${escapeHTML(s.code)}">${escapeHTML(s.className||'')} · ${escapeHTML(s.name)}</option>`).join('');
   studentEl.value=scoped.some(s=>s.code===currentStudent)?currentStudent:'all';
 
-  const paidSet=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidTxnMap=paidReportTransactionMap(transactions);
   const feeMap=new Map();
   students.forEach(student=>studentDueItems(student).forEach(item=>{
-    if(!paidSet.has(`${student.code}|${item.id}`))return;
+    if(!paidTxnMap.has(cashSessionKey(student.code,item.id)))return;
     const key=paidReportFeeKey(item);if(!feeMap.has(key))feeMap.set(key,item);
   }));
   feeEl.innerHTML='<option value="all">Tất cả khoản đã nộp</option>'+[...feeMap.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name,'vi')).map(([key,item])=>`<option value="${escapeHTML(key)}">${escapeHTML(item.name)} · ${money(item.amount)}</option>`).join('');
@@ -1830,6 +1851,8 @@ async function exportPaidReport(){
   const classValue=$('#paidReportClass').value||'all',studentValue=$('#paidReportStudent').value||'all';
   const scopeLabel=studentValue!=='all'?(rows[0]?.student.name||'Học sinh'):(classValue==='all'?'Toàn trường':`Lớp ${classValue}`);
   const noteMode=$('#paidReportNoteMode').value||'fees';
+  const {from:fromDate,to:toDate}=paidReportDateRange();
+  const periodLabel=fromDate&&toDate?`Từ ${noticeDateVi(fromDate)} đến ${noticeDateVi(toDate)}`:(fromDate?`Từ ${noticeDateVi(fromDate)}`:(toDate?`Đến ${noticeDateVi(toDate)}`:'Toàn bộ thời gian'));
 
   const zip=new JSZip();
   zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
@@ -1842,7 +1865,7 @@ async function exportPaidReport(){
   sheetRows.push(excelRow(1,[{v:'UBND XÃ HIẾU GIANG',s:1}],22));
   sheetRows.push(excelRow(2,[{v:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',s:1}],22));
   sheetRows.push(excelRow(4,[{v:'DANH SÁCH HỌC SINH ĐÃ NỘP KHOẢN THU',s:2}],28));
-  sheetRows.push(excelRow(5,[{v:`Phạm vi: ${scopeLabel} · Khoản thu: ${selectedLabels.join(' + ')}`,s:1}],22));
+  sheetRows.push(excelRow(5,[{v:`Phạm vi: ${scopeLabel} · Khoản thu: ${selectedLabels.join(' + ')} · Thời gian thu: ${periodLabel}`,s:1}],22));
   sheetRows.push(excelRow(7,['STT','HỌ TÊN','LỚP','ĐỊA CHỈ (THÔN)','SỐ CCCD','GIỚI TÍNH','NGÀY/THÁNG/NĂM SINH','SỐ TIỀN','GHI CHÚ'].map(v=>({v,s:3})),34));
   rows.forEach((row,index)=>{
     const s=row.student;
@@ -1859,7 +1882,8 @@ async function exportPaidReport(){
 
   const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const feeName=selectedLabels.length===1?selectedLabels[0]:'Nhieu-khoan',className=classValue==='all'?'Toan-truong':classValue;
-  const filename=`Danh-sach-da-nop-${feeSafeCode(className,20)}-${feeSafeCode(feeName,28)}.xlsx`;
+  const datePart=fromDate||toDate?feeSafeCode(`${fromDate||'dau'}_${toDate||'nay'}`,24):'toan-bo-thoi-gian';
+  const filename=`Danh-sach-da-nop-${feeSafeCode(className,20)}-${feeSafeCode(feeName,28)}-${datePart}.xlsx`;
   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
   toast(`Đã xuất ${rows.length} học sinh đã nộp.`);
 }
@@ -1925,6 +1949,8 @@ function wire() {
   $('#paidReportClass').addEventListener('change',refreshPaidReport);
   $('#paidReportStudent').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
   $('#paidReportCondition').addEventListener('change',async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
+  $('#paidReportFromDate').addEventListener('change',refreshPaidReport);
+  $('#paidReportToDate').addEventListener('change',refreshPaidReport);
   $('#paidReportFees').addEventListener('change',async e=>{const selected=[...e.currentTarget.selectedOptions];if(selected.length>1&&selected.some(o=>o.value==='all'))e.currentTarget.querySelector('option[value="all"]').selected=false;const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
   $('#exportPaidReport').onclick=()=>exportPaidReport().catch(e=>{console.error(e);toast(e.message||'Không xuất được danh sách đã nộp.',true);});
   $('#exportStudents').onclick=exportStudents;$('#backupButton').onclick=$('#backupButtonTop').onclick=backup;$('#restoreButton').onclick=()=>$('#restoreFileInput').click();
