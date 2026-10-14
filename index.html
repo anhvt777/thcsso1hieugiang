@@ -297,7 +297,9 @@
             <label class="qr-field"><span>Học sinh</span><select id="paidReportStudent"><option value="all">Tất cả học sinh</option></select></label>
             <label class="qr-field"><span>Điều kiện</span><select id="paidReportCondition"><option value="any">Có ít nhất 1 khoản đã nộp</option><option value="all">Đã nộp đủ tất cả khoản được chọn</option></select></label>
             <label class="qr-field"><span>Cột ghi chú</span><select id="paidReportNoteMode"><option value="fees">Tên khoản đã nộp</option><option value="blank">Để trống</option></select></label>
-            <label class="qr-field paid-report-fees"><span>Khoản thu đã nộp</span><select id="paidReportFees" multiple size="6"><option value="all" selected>Tất cả khoản đã nộp</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Số tiền trong báo cáo là tổng các khoản đã chọn và đã thu thực tế.</small></label>
+            <label class="qr-field"><span>Từ ngày thu</span><input id="paidReportFromDate" type="date"></label>
+            <label class="qr-field"><span>Đến ngày thu</span><input id="paidReportToDate" type="date"></label>
+            <label class="qr-field paid-report-fees"><span>Khoản thu đã nộp</span><select id="paidReportFees" multiple size="6"><option value="all" selected>Tất cả khoản đã nộp</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Số tiền chỉ cộng các khoản đã thu thực tế trong khoảng ngày đang chọn.</small></label>
           </div>
           <div class="receipt-batch-actions paid-report-actions"><span id="paidReportSummary">Chưa có dữ liệu đã thu để lập báo cáo.</span><button class="button button-primary" id="exportPaidReport">↓ Xuất Excel danh sách đã nộp</button></div>
         </article>
