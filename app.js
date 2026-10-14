@@ -1871,7 +1871,7 @@ async function exportPaidReport(){
     const s=row.student;
     const note=noteMode==='blank'?'':row.note;
     sheetRows.push(excelRow(index+8,[
-      {v:index+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate||'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}
+      {v:index+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate?noticeDateVi(normalizeDate(s.birthDate)):'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}
     ],22));
   });
   const totalRow=rows.length+8;
@@ -1892,7 +1892,7 @@ function exportStudents() {
   Promise.all([all('students'),all('transactions')]).then(([items,stored])=>{
     const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
     const headers=['Mã MOET','Họ và tên','Lớp','Địa chỉ (thôn)','Số CCCD / SĐD cá nhân','Giới tính','Ngày sinh','Dân tộc','Tên cha','Tên mẹ','Điện thoại','Số món phải thu','Tổng phải thu','Đã thu','Còn lại'];
-    const lines=items.map(s=>{const fees=studentDueItems(s),due=fees.reduce((a,x)=>a+x.amount,0),paidAmount=fees.filter(x=>paid.has(`${s.code}|${x.id}`)).reduce((a,x)=>a+x.amount,0);return [s.code,s.name,s.className,s.address||'',s.personalId||'',s.gender||'',s.birthDate||'',s.ethnicity||'',s.fatherName||'',s.motherName||'',s.phone||'',fees.length,due,paidAmount,Math.max(0,due-paidAmount)].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');});
+    const lines=items.map(s=>{const fees=studentDueItems(s),due=fees.reduce((a,x)=>a+x.amount,0),paidAmount=fees.filter(x=>paid.has(`${s.code}|${x.id}`)).reduce((a,x)=>a+x.amount,0);return [s.code,s.name,s.className,s.address||'',s.personalId||'',s.gender||'',s.birthDate?noticeDateVi(normalizeDate(s.birthDate)):'',s.ethnicity||'',s.fatherName||'',s.motherName||'',s.phone||'',fees.length,due,paidAmount,Math.max(0,due-paidAmount)].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',');});
     download('danh-sach-hoc-sinh-hieu-giang.csv','\uFEFF'+headers.join(',')+'\r\n'+lines.join('\r\n'),'text/csv;charset=utf-8');
   });
 }
