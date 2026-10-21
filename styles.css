@@ -140,3 +140,18 @@
 @media(max-width:700px){.cash-session-toolbar{grid-template-columns:1fr}.cash-session-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cash-session-check{grid-template-columns:1fr}}
 
 .cashier-file-summary{margin-top:10px;padding:10px 12px;border-radius:9px;background:#f5f8f7;border:1px solid #dde7e4;font-size:9px;color:#667572;line-height:1.45}
+
+.insurance-remittance-card{padding:19px;margin-bottom:16px}
+.insurance-remittance-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.insurance-remittance-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-top:14px}
+.insurance-remittance-stats>div{padding:11px 12px;border-radius:10px;background:#eef8f5;border:1px solid #d7e8e3}
+.insurance-remittance-stats span,.insurance-remittance-stats strong{display:block}
+.insurance-remittance-stats span{font-size:9px;color:var(--muted)}
+.insurance-remittance-stats strong{font-size:16px;color:#136f65;margin-top:4px}
+.insurance-remittance-status{margin-top:12px;padding:11px 13px;border-radius:10px;background:#f6f9f8;border:1px solid #dde7e4;font-size:10px;color:#60706d}
+.insurance-remittance-preview{margin-top:12px;max-height:360px}
+.insurance-remittance-actions{margin-top:12px}
+.insurance-remittance-history{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.panel-header.compact{margin-bottom:8px}
+@media(max-width:1100px){.insurance-remittance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.insurance-remittance-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.insurance-remittance-grid{grid-template-columns:1fr}.insurance-remittance-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
