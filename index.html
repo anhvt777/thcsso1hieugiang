@@ -303,6 +303,34 @@
           </div>
           <div class="receipt-batch-actions paid-report-actions"><span id="paidReportSummary">Chưa có dữ liệu đã thu để lập báo cáo.</span><button class="button button-primary" id="exportPaidReport">↓ Xuất Excel danh sách đã nộp</button></div>
         </article>
+        <article class="panel insurance-remittance-card">
+          <div class="panel-header"><div><h2>Chuyển nộp bảo hiểm</h2><p>Đối chiếu số đã thu với số đã chuyển cho đơn vị bảo hiểm; mỗi khoản đã chuyển được khóa theo học sinh để tránh chuyển trùng.</p></div><span class="mini-tag">ĐỐI CHIẾU</span></div>
+          <div class="insurance-remittance-grid">
+            <label class="qr-field"><span>Loại bảo hiểm</span><select id="remitFeeType"><option value="insurance">Bảo hiểm y tế (BHYT)</option><option value="mandatory">Bảo hiểm thân thể (BHTT)</option></select></label>
+            <label class="qr-field"><span>Từ ngày thu</span><input id="remitFromDate" type="date"></label>
+            <label class="qr-field"><span>Đến ngày thu</span><input id="remitToDate" type="date"></label>
+            <label class="qr-field"><span>Đơn vị nhận</span><input id="remitRecipient" maxlength="150" placeholder="Ví dụ: BHXH khu vực / Công ty bảo hiểm"></label>
+            <label class="qr-field"><span>Ngày chuyển nộp</span><input id="remitTransferDate" type="date"></label>
+            <label class="qr-field"><span>Số chứng từ / tham chiếu</span><input id="remitReference" maxlength="80" placeholder="Số UNC, mã giao dịch..."></label>
+            <label class="qr-field"><span>Số tiền thực chuyển</span><input id="remitActualAmount" inputmode="numeric" placeholder="Nhập số tiền thực chuyển"></label>
+            <label class="qr-field"><span>Ghi chú</span><input id="remitNote" maxlength="200" placeholder="Nội dung bổ sung (nếu có)"></label>
+          </div>
+          <div class="insurance-remittance-stats">
+            <div><span>Đã thu phù hợp</span><strong id="remitCollected">0 ₫</strong></div>
+            <div><span>Đã chuyển trước đó</span><strong id="remitPreviously">0 ₫</strong></div>
+            <div><span>Còn phải chuyển</span><strong id="remitPending">0 ₫</strong></div>
+            <div><span>Số học sinh chờ chuyển</span><strong id="remitStudentCount">0</strong></div>
+            <div><span>Chênh lệch</span><strong id="remitDifference">0 ₫</strong></div>
+          </div>
+          <div class="insurance-remittance-status" id="remitStatus">Chọn loại bảo hiểm và khoảng thời gian thu để lập đợt chuyển.</div>
+          <div class="table-wrap insurance-remittance-preview"><table><thead><tr><th>STT</th><th>HỌC SINH</th><th>LỚP</th><th>NGÀY NỘP</th><th>SỐ TIỀN</th><th>TRẠNG THÁI</th></tr></thead><tbody id="remitPreviewBody"><tr><td colspan="6" class="empty-cell">Chưa có dữ liệu chờ chuyển.</td></tr></tbody></table></div>
+          <div class="receipt-batch-actions insurance-remittance-actions"><span>Chỉ xác nhận khi số tiền thực chuyển khớp đúng số còn phải chuyển.</span><button class="button button-outline" id="exportRemitPreview">↓ Xuất bảng kê chuyển nộp</button><button class="button button-primary" id="confirmRemittance" disabled>✓ Xác nhận đã chuyển nộp</button></div>
+          <div class="insurance-remittance-history">
+            <div class="panel-header compact"><div><h3>Lịch sử chuyển nộp</h3><p>Các đợt đã xác nhận trên thiết bị này.</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>NGÀY CHUYỂN</th><th>LOẠI</th><th>ĐƠN VỊ NHẬN</th><th>SỐ HS</th><th>SỐ TIỀN</th><th>THAM CHIẾU</th></tr></thead><tbody id="remitHistoryBody"><tr><td colspan="6" class="empty-cell">Chưa có đợt chuyển nộp.</td></tr></tbody></table></div>
+          </div>
+        </article>
+
         <article class="panel table-panel"><div class="panel-header"><div><h2>Lịch sử nhập file</h2><p>Nhật ký chỉ lưu trên máy đang sử dụng</p></div></div><div class="table-wrap"><table><thead><tr><th>THỜI GIAN</th><th>LOẠI FILE</th><th>TÊN FILE</th><th>SỐ DÒNG</th><th>KẾT QUẢ</th></tr></thead><tbody id="historyTable"><tr><td colspan="5" class="empty-cell">Chưa có lịch sử nhập file.</td></tr></tbody></table></div></article>
       </section>
 
