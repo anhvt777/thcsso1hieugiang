@@ -1638,7 +1638,7 @@ async function refresh() {
   const notice=students.length?`${students.length} học sinh · ${transactions.filter(x=>x.paymentStatus==='valid').length} món thu khớp chính xác / ${transactions.length} giao dịch. ${legacy?'Danh sách cũ chỉ có tổng phải thu; hãy nhập lại file chi tiết từng khoản.':'Dữ liệu đang lưu riêng trên máy này.'}`:'Chọn danh sách học sinh và báo cáo thu để bắt đầu theo dõi.';
   $('#dataNoticeText').textContent=notice;
   renderFeeProgress(t.summaries);renderChart(transactions);renderClasses(students,transactions);renderStudents(students,transactions);renderFeeDetails(students,transactions,t.summaries);
-  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);await renderPaidReportTool(students,transactions,feeCatalog);
+  const feeCatalog=await getFeeCatalog();await populateFeeReportFilters(feeCatalog);await renderFeeSetup(students);renderQrPage(students,transactions,qrConfig);await renderNoticeTool(students,transactions,feeCatalog);await renderReceiptPage(students,transactions);await renderPaidReportTool(students,transactions,feeCatalog);await renderRemittanceTool(students,transactions);
   const transactionHtml=transactions.length?renderTransactions(transactions):'<tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr>';
   $('#transactionsTable').innerHTML=transactionHtml;$('#importsTransactionsTable').innerHTML=transactionHtml;
   ['allTxnCount','importsAllTxnCount'].forEach(id=>{const el=$(`#${id}`);if(el)el.textContent=transactions.length;});
@@ -1888,6 +1888,62 @@ async function exportPaidReport(){
   toast(`Đã xuất ${rows.length} học sinh đã nộp.`);
 }
 
+async function getInsuranceRemittances(){
+  return (await all('history')).filter(x=>x.kind==='Chuyển nộp bảo hiểm'&&Array.isArray(x.items));
+}
+function remittanceRange(){return {from:$('#remitFromDate')?.value||'',to:$('#remitToDate')?.value||''};}
+function remittanceTxnInRange(t,range){
+  const d=paidReportTxnDate(t);if(!d)return !range.from&&!range.to;
+  if(range.from&&d<range.from)return false;if(range.to&&d>range.to)return false;return true;
+}
+async function computeRemittanceState(students,transactions){
+  const category=$('#remitFeeType')?.value||'insurance',range=remittanceRange();
+  const validTx=transactions.filter(t=>t.paymentStatus==='valid'&&remittanceTxnInRange(t,range));
+  const txMap=new Map();
+  validTx.forEach(t=>transactionMatchedItemIds(t).forEach(id=>txMap.set(cashSessionKey(t.studentCode,id),t)));
+  const remittances=await getInsuranceRemittances();
+  const remittedKeys=new Set(remittances.filter(r=>r.feeCategory===category).flatMap(r=>r.items.map(i=>cashSessionKey(i.studentCode,i.itemId))));
+  const eligible=[],allCollected=[];
+  for(const s of students){
+    for(const item of studentDueItems(s).filter(x=>x.category===category)){
+      const key=cashSessionKey(s.code,item.id),txn=txMap.get(key);if(!txn)continue;
+      const row={student:s,item,txn,key,date:paidReportTxnDate(txn),amount:item.amount};
+      allCollected.push(row);if(!remittedKeys.has(key))eligible.push(row);
+    }
+  }
+  const previously=allCollected.filter(x=>remittedKeys.has(x.key));
+  return {category,range,eligible,previously,allCollected,collectedAmount:allCollected.reduce((s,x)=>s+x.amount,0),previouslyAmount:previously.reduce((s,x)=>s+x.amount,0),pendingAmount:eligible.reduce((s,x)=>s+x.amount,0)};
+}
+async function renderRemittanceTool(students,transactions){
+  if(!$('#remitPreviewBody'))return;
+  const state=await computeRemittanceState(students,transactions);
+  const actual=parseMoneyInput($('#remitActualAmount')?.value||0),diff=actual-state.pendingAmount;
+  $('#remitCollected').textContent=money(state.collectedAmount);$('#remitPreviously').textContent=money(state.previouslyAmount);$('#remitPending').textContent=money(state.pendingAmount);
+  $('#remitStudentCount').textContent=new Set(state.eligible.map(x=>x.student.code)).size;$('#remitDifference').textContent=money(diff);
+  $('#remitDifference').classList.toggle('cash-diff-ok',state.pendingAmount>0&&diff===0);$('#remitDifference').classList.toggle('cash-diff-bad',diff!==0);
+  $('#remitPreviewBody').innerHTML=state.eligible.length?state.eligible.map((x,i)=>'<tr><td>'+(i+1)+'</td><td><strong>'+escapeHTML(x.student.name)+'</strong></td><td>'+escapeHTML(x.student.className||'')+'</td><td>'+escapeHTML(x.date?noticeDateVi(x.date):'—')+'</td><td>'+money(x.amount)+'</td><td><span class="status-badge pending">Chờ chuyển</span></td></tr>').join(''):'<tr><td colspan="6" class="empty-cell">Không còn khoản phù hợp chờ chuyển.</td></tr>';
+  const recipient=$('#remitRecipient')?.value.trim(),transferDate=$('#remitTransferDate')?.value,reference=$('#remitReference')?.value.trim();
+  const canConfirm=state.pendingAmount>0&&actual===state.pendingAmount&&recipient&&transferDate&&reference;$('#confirmRemittance').disabled=!canConfirm;
+  $('#remitStatus').innerHTML=!state.pendingAmount?'<strong class="success-text">Không còn số phải chuyển trong phạm vi đã chọn.</strong>':(actual!==state.pendingAmount?'Số phải chuyển <strong>'+money(state.pendingAmount)+'</strong> · thực chuyển <strong>'+money(actual)+'</strong> · chênh lệch <strong>'+money(diff)+'</strong>.':(!recipient||!transferDate||!reference?'Số tiền đã khớp. Hãy nhập đơn vị nhận, ngày chuyển và số chứng từ.':'<strong class="success-text">KHỚP · Có thể xác nhận đợt chuyển nộp.</strong>'));
+  const history=await getInsuranceRemittances();
+  $('#remitHistoryBody').innerHTML=history.length?history.sort((a,b)=>(b.transferDate||'').localeCompare(a.transferDate||'')).map(r=>'<tr><td>'+escapeHTML(noticeDateVi(r.transferDate||''))+'</td><td>'+escapeHTML(getFeeLabel(r.feeCategory))+'</td><td>'+escapeHTML(r.recipient||'')+'</td><td>'+new Set(r.items.map(i=>i.studentCode)).size+'</td><td>'+money(r.amount)+'</td><td>'+escapeHTML(r.reference||'')+'</td></tr>').join(''):'<tr><td colspan="6" class="empty-cell">Chưa có đợt chuyển nộp.</td></tr>';
+  return state;
+}
+async function confirmRemittance(){
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]),tx=reconcileTransactions(students,stored),state=await computeRemittanceState(students,tx);
+  const actual=parseMoneyInput($('#remitActualAmount').value),recipient=$('#remitRecipient').value.trim(),transferDate=$('#remitTransferDate').value,reference=$('#remitReference').value.trim(),note=$('#remitNote').value.trim();
+  if(!state.pendingAmount)return toast('Không có khoản bảo hiểm chờ chuyển.',true);if(actual!==state.pendingAmount)return toast('Số tiền thực chuyển chưa khớp số phải chuyển.',true);if(!recipient||!transferDate||!reference)return toast('Hãy nhập đơn vị nhận, ngày chuyển và số chứng từ.',true);
+  const now=new Date().toISOString();
+  const record={id:crypto.randomUUID(),kind:'Chuyển nộp bảo hiểm',fileName:reference,rows:state.eligible.length,imported:state.eligible.length,detail:getFeeLabel(state.category)+' · '+state.eligible.length+' khoản · '+money(state.pendingAmount)+' · '+recipient,at:now,feeCategory:state.category,recipient,transferDate,reference,note,amount:actual,range:state.range,items:state.eligible.map(x=>({studentCode:x.student.code,itemId:x.item.id,amount:x.amount,paymentDate:x.date}))};
+  await request('history','put',record);$('#remitActualAmount').value='';$('#remitReference').value='';$('#remitNote').value='';await refresh();toast('Đã xác nhận chuyển nộp '+money(actual)+' cho '+recipient+'.');
+}
+async function exportRemittancePreview(){
+  const [students,stored]=await Promise.all([all('students'),all('transactions')]),tx=reconcileTransactions(students,stored),state=await computeRemittanceState(students,tx);
+  if(!state.eligible.length)return toast('Không có khoản chờ chuyển để xuất.',true);
+  const headers=['STT','Họ tên','Lớp','Mã học sinh','Ngày sinh','Ngày nộp','Khoản thu','Số tiền'];
+  const rows=state.eligible.map((x,i)=>[i+1,x.student.name,x.student.className,x.student.code,noticeDateVi(normalizeDate(x.student.birthDate||'')),noticeDateVi(x.date||''),x.item.name,x.amount].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(','));
+  download('bang-ke-chuyen-nop-'+state.category+'-'+new Date().toISOString().slice(0,10)+'.csv','\uFEFF'+headers.join(',')+'\r\n'+rows.join('\r\n'),'text/csv;charset=utf-8');
+}
 function exportStudents() {
   Promise.all([all('students'),all('transactions')]).then(([items,stored])=>{
     const tx=reconcileTransactions(items,stored),paid=new Set(tx.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
@@ -1953,6 +2009,10 @@ function wire() {
   $('#paidReportToDate').addEventListener('change',refreshPaidReport);
   $('#paidReportFees').addEventListener('change',async e=>{const selected=[...e.currentTarget.selectedOptions];if(selected.length>1&&selected.some(o=>o.value==='all'))e.currentTarget.querySelector('option[value="all"]').selected=false;const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
   $('#exportPaidReport').onclick=()=>exportPaidReport().catch(e=>{console.error(e);toast(e.message||'Không xuất được danh sách đã nộp.',true);});
+  const refreshRemit=async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderRemittanceTool(students,reconcileTransactions(students,stored));};
+  ['remitFeeType','remitFromDate','remitToDate','remitRecipient','remitTransferDate','remitReference','remitActualAmount','remitNote'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener(['remitActualAmount','remitRecipient','remitReference','remitNote'].includes(id)?'input':'change',refreshRemit);});
+  $('#confirmRemittance').onclick=()=>confirmRemittance().catch(e=>{console.error(e);toast(e.message||'Không xác nhận được chuyển nộp.',true);});
+  $('#exportRemitPreview').onclick=()=>exportRemittancePreview().catch(e=>{console.error(e);toast('Không xuất được bảng kê chuyển nộp.',true);});
   $('#exportStudents').onclick=exportStudents;$('#backupButton').onclick=$('#backupButtonTop').onclick=backup;$('#restoreButton').onclick=()=>$('#restoreFileInput').click();
   $('#clearDataButton').onclick=async()=>{if(confirm('Xóa toàn bộ dữ liệu học sinh, giao dịch và lịch sử trên trình duyệt này?')){await clearAll();await refresh();toast('Đã xóa dữ liệu trên máy này.');}};
   $('#menuToggle').onclick=()=>$('#sidebar').classList.toggle('open');
