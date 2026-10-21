@@ -1866,18 +1866,18 @@ async function exportPaidReport(){
   sheetRows.push(excelRow(2,[{v:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',s:1}],22));
   sheetRows.push(excelRow(4,[{v:'DANH SÁCH HỌC SINH ĐÃ NỘP KHOẢN THU',s:2}],28));
   sheetRows.push(excelRow(5,[{v:`Phạm vi: ${scopeLabel} · Khoản thu: ${selectedLabels.join(' + ')} · Thời gian thu: ${periodLabel}`,s:1}],22));
-  sheetRows.push(excelRow(7,['STT','HỌ TÊN','LỚP','ĐỊA CHỈ (THÔN)','SỐ CCCD','GIỚI TÍNH','NGÀY/THÁNG/NĂM SINH','SỐ TIỀN','GHI CHÚ'].map(v=>({v,s:3})),34));
+  sheetRows.push(excelRow(7,['STT','HỌ TÊN','LỚP','ĐỊA CHỈ (THÔN)','SỐ CCCD','GIỚI TÍNH','NGÀY/THÁNG/NĂM SINH','NGÀY NỘP','SỐ TIỀN','GHI CHÚ'].map(v=>({v,s:3})),34));
   rows.forEach((row,index)=>{
     const s=row.student;
     const note=noteMode==='blank'?'':row.note;
     sheetRows.push(excelRow(index+8,[
-      {v:index+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate?noticeDateVi(normalizeDate(s.birthDate)):'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}
+      {v:index+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate?noticeDateVi(normalizeDate(s.birthDate)):'',s:4},{v:row.paymentDates?.length?[...new Set(row.paymentDates.map(noticeDateVi))].join('; '):'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}
     ],22));
   });
   const totalRow=rows.length+8;
-  sheetRows.push(excelRow(totalRow,[{v:'',s:4},{v:'TỔNG CỘNG',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:rows.reduce((sum,r)=>sum+r.amount,0),t:'n',s:5},{v:'',s:3}],24));
+  sheetRows.push(excelRow(totalRow,[{v:'',s:4},{v:'TỔNG CỘNG',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:rows.reduce((sum,r)=>sum+r.amount,0),t:'n',s:5},{v:'',s:3}],24));
 
-  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="7" topLeftCell="A8" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="7" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="20" customWidth="1"/><col min="5" max="5" width="19" customWidth="1"/><col min="6" max="6" width="12" customWidth="1"/><col min="7" max="7" width="20" customWidth="1"/><col min="8" max="8" width="16" customWidth="1"/><col min="9" max="9" width="34" customWidth="1"/></cols><sheetData>${sheetRows.join('')}</sheetData><autoFilter ref="A7:I${rows.length+7}"/><mergeCells count="5"><mergeCell ref="A1:D1"/><mergeCell ref="A2:D2"/><mergeCell ref="A4:I4"/><mergeCell ref="A5:I5"/><mergeCell ref="B${totalRow}:G${totalRow}"/></mergeCells></worksheet>`;
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="7" topLeftCell="A8" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="7" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="20" customWidth="1"/><col min="5" max="5" width="19" customWidth="1"/><col min="6" max="6" width="12" customWidth="1"/><col min="7" max="7" width="20" customWidth="1"/><col min="8" max="8" width="16" customWidth="1"/><col min="9" max="9" width="16" customWidth="1"/><col min="10" max="10" width="34" customWidth="1"/></cols><sheetData>${sheetRows.join('')}</sheetData><autoFilter ref="A7:J${rows.length+7}"/><mergeCells count="5"><mergeCell ref="A1:D1"/><mergeCell ref="A2:D2"/><mergeCell ref="A4:J4"/><mergeCell ref="A5:J5"/><mergeCell ref="B${totalRow}:H${totalRow}"/></mergeCells></worksheet>`;
   zip.folder('xl').folder('worksheets').file('sheet1.xml',sheet);
 
   const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
