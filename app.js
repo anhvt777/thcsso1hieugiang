@@ -1888,6 +1888,43 @@ async function exportPaidReport(){
   toast(`Đã xuất ${rows.length} học sinh đã nộp.`);
 }
 
+async function exportPaidReportByClass(){
+  if(typeof JSZip==='undefined')return toast('Thiếu thư viện xuất Excel. Hãy tải lại trang.',true);
+  const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);
+  const transactions=reconcileTransactions(students,stored),rows=paidReportRows(students,transactions);
+  if(!rows.length)return toast('Không có học sinh đã nộp phù hợp điều kiện để xuất.',true);
+  const selected=paidReportSelectedFees();
+  const selectedLabels=selected?[...selected].map(key=>{if(key.startsWith('catalog:'))return catalog.find(f=>f.id===key.slice(8))?.name||'Khoản thu';const item=rows.flatMap(r=>r.paidItems).find(i=>paidReportFeeKey(i)===key);return item?.name||'Khoản thu';}):['Tất cả khoản đã nộp'];
+  const noteMode=$('#paidReportNoteMode').value||'fees';
+  const {from:fromDate,to:toDate}=paidReportDateRange();
+  const periodLabel=fromDate&&toDate?`Từ ${noticeDateVi(fromDate)} đến ${noticeDateVi(toDate)}`:(fromDate?`Từ ${noticeDateVi(fromDate)}`:(toDate?`Đến ${noticeDateVi(toDate)}`:'Toàn bộ thời gian'));
+  const groups=[...new Set(rows.map(r=>r.student.className||'Chưa xếp lớp'))].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true,sensitivity:'base'}));
+  const safeSheetName=(name,index)=>{let s=String(name||('Lớp '+(index+1))).replace(/[\\\/\?\*\[\]:]/g,' ').trim().slice(0,31);return s||('Lớp '+(index+1));};
+  const zip=new JSZip();
+  let contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+  let workbookSheets='',workbookRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+  groups.forEach((className,idx)=>{contentTypes+=`<Override PartName="/xl/worksheets/sheet${idx+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;workbookSheets+=`<sheet name="${escapeHTML(safeSheetName(className,idx)).replace(/&apos;/g,'&apos;')}" sheetId="${idx+1}" r:id="rId${idx+1}"/>`;workbookRels+=`<Relationship Id="rId${idx+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${idx+1}.xml"/>`;});
+  contentTypes+='</Types>';workbookRels+=`<Relationship Id="rId${groups.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  zip.file('[Content_Types].xml',contentTypes);
+  zip.folder('_rels').file('.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  zip.folder('xl').file('workbook.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>`);
+  zip.folder('xl').folder('_rels').file('workbook.xml.rels',workbookRels);
+  zip.folder('xl').file('styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="11"/><name val="Times New Roman"/></font><font><b/><sz val="14"/><name val="Times New Roman"/></font><font><b/><sz val="16"/><name val="Times New Roman"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE7F3F0"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF078778"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FF9BB8B2"/></left><right style="thin"><color rgb="FF9BB8B2"/></right><top style="thin"><color rgb="FF9BB8B2"/></top><bottom style="thin"><color rgb="FF9BB8B2"/></bottom></border></borders><cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment vertical="center"/></xf><xf numFmtId="3" fontId="0" fillId="0" borderId="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf><xf numFmtId="0" fontId="3" fillId="3" borderId="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs></styleSheet>');
+  groups.forEach((className,idx)=>{
+    const classRows=rows.filter(r=>(r.student.className||'Chưa xếp lớp')===className);
+    const sheetRows=[];sheetRows.push(excelRow(1,[{v:'UBND XÃ HIẾU GIANG',s:1}],22));sheetRows.push(excelRow(2,[{v:'TRƯỜNG THCS SỐ 1 HIẾU GIANG',s:1}],22));sheetRows.push(excelRow(4,[{v:'DANH SÁCH HỌC SINH ĐÃ NỘP KHOẢN THU',s:2}],28));
+    sheetRows.push(excelRow(5,[{v:`Lớp ${className} · Khoản thu: ${selectedLabels.join(' + ')} · Thời gian thu: ${periodLabel}`,s:1}],22));
+    sheetRows.push(excelRow(7,['STT','HỌ TÊN','LỚP','ĐỊA CHỈ (THÔN)','SỐ CCCD','GIỚI TÍNH','NGÀY/THÁNG/NĂM SINH','NGÀY NỘP','SỐ TIỀN','GHI CHÚ'].map(v=>({v,s:3})),34));
+    classRows.forEach((row,i)=>{const s=row.student,note=noteMode==='blank'?'':row.note;sheetRows.push(excelRow(i+8,[{v:i+1,t:'n',s:4},{v:s.name,s:4},{v:s.className||'',s:4},{v:s.address||'',s:4},{v:s.personalId||'',s:4},{v:s.gender||'',s:4},{v:s.birthDate?noticeDateVi(normalizeDate(s.birthDate)):'',s:4},{v:row.paymentDates?.length?[...new Set(row.paymentDates.map(noticeDateVi))].join('; '):'',s:4},{v:row.amount,t:'n',s:5},{v:note,s:4}],22));});
+    const totalRow=classRows.length+8;sheetRows.push(excelRow(totalRow,[{v:'',s:4},{v:'TỔNG CỘNG',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:'',s:3},{v:classRows.reduce((sum,r)=>sum+r.amount,0),t:'n',s:5},{v:'',s:3}],24));
+    const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="7" topLeftCell="A8" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="7" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="20" customWidth="1"/><col min="5" max="5" width="19" customWidth="1"/><col min="6" max="6" width="12" customWidth="1"/><col min="7" max="7" width="20" customWidth="1"/><col min="8" max="8" width="16" customWidth="1"/><col min="9" max="9" width="16" customWidth="1"/><col min="10" max="10" width="34" customWidth="1"/></cols><sheetData>${sheetRows.join('')}</sheetData><autoFilter ref="A7:J${classRows.length+7}"/><mergeCells count="5"><mergeCell ref="A1:D1"/><mergeCell ref="A2:D2"/><mergeCell ref="A4:J4"/><mergeCell ref="A5:J5"/><mergeCell ref="B${totalRow}:H${totalRow}"/></mergeCells></worksheet>`;
+    zip.folder('xl').folder('worksheets').file(`sheet${idx+1}.xml`,sheet);
+  });
+  const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const feeName=selectedLabels.length===1?selectedLabels[0]:'Nhieu-khoan',datePart=fromDate||toDate?feeSafeCode(`${fromDate||'dau'}_${toDate||'nay'}`,24):'toan-bo-thoi-gian';
+  const filename=`Danh-sach-da-nop-moi-lop-1-sheet-${feeSafeCode(feeName,28)}-${datePart}.xlsx`;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
+  toast(`Đã xuất ${groups.length} sheet theo lớp · ${rows.length} học sinh.`);
+}
 async function getInsuranceRemittances(){
   return (await all('history')).filter(x=>x.kind==='Chuyển nộp bảo hiểm'&&Array.isArray(x.items));
 }
@@ -2009,6 +2046,7 @@ function wire() {
   $('#paidReportToDate').addEventListener('change',refreshPaidReport);
   $('#paidReportFees').addEventListener('change',async e=>{const selected=[...e.currentTarget.selectedOptions];if(selected.length>1&&selected.some(o=>o.value==='all'))e.currentTarget.querySelector('option[value="all"]').selected=false;const [students,stored]=await Promise.all([all('students'),all('transactions')]);updatePaidReportSummary(students,reconcileTransactions(students,stored));});
   $('#exportPaidReport').onclick=()=>exportPaidReport().catch(e=>{console.error(e);toast(e.message||'Không xuất được danh sách đã nộp.',true);});
+  $('#exportPaidReportByClass').onclick=()=>exportPaidReportByClass().catch(e=>{console.error(e);toast(e.message||'Không xuất được báo cáo theo lớp.',true);});
   const refreshRemit=async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderRemittanceTool(students,reconcileTransactions(students,stored));};
   ['remitFeeType','remitFromDate','remitToDate','remitRecipient','remitTransferDate','remitReference','remitActualAmount','remitNote'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener(['remitActualAmount','remitRecipient','remitReference','remitNote'].includes(id)?'input':'change',refreshRemit);});
   $('#confirmRemittance').onclick=()=>confirmRemittance().catch(e=>{console.error(e);toast(e.message||'Không xác nhận được chuyển nộp.',true);});
