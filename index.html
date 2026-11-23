@@ -303,6 +303,16 @@
           </div>
           <div class="receipt-batch-actions paid-report-actions"><span id="paidReportSummary">Chưa có dữ liệu đã thu để lập báo cáo.</span><div class="paid-report-export-buttons"><button class="button button-outline" id="exportPaidReportByClass">↓ Excel · mỗi lớp 1 sheet</button><button class="button button-primary" id="exportPaidReport">↓ Xuất Excel danh sách đã nộp</button></div></div>
         </article>
+        <article class="panel unpaid-report-card">
+          <div class="panel-header"><div><h2>Danh sách các khoản chưa thu</h2><p>Lập danh sách học sinh còn thiếu tiền theo lớp để gửi giáo viên chủ nhiệm/lớp đôn đốc nộp.</p></div><span class="mini-tag">XLSX</span></div>
+          <div class="receipt-filter-grid unpaid-report-grid">
+            <label class="qr-field"><span>Lớp</span><select id="unpaidReportClass"><option value="all">Tất cả lớp</option></select></label>
+            <label class="qr-field"><span>Học sinh</span><select id="unpaidReportStudent"><option value="all">Tất cả học sinh</option></select></label>
+            <label class="qr-field unpaid-report-fees"><span>Khoản chưa thu</span><select id="unpaidReportFees" multiple size="6"><option value="all" selected>Tất cả khoản chưa thu</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Báo cáo chỉ lấy những khoản chưa được ghi nhận đã thu.</small></label>
+          </div>
+          <div class="receipt-batch-actions unpaid-report-actions"><span id="unpaidReportSummary">Chưa có dữ liệu để lập báo cáo.</span><div class="paid-report-export-buttons"><button class="button button-outline" id="exportUnpaidReport">↓ Xuất 1 sheet</button><button class="button button-primary" id="exportUnpaidReportByClass">↓ Excel · mỗi lớp 1 sheet</button></div></div>
+        </article>
+
         <article class="panel insurance-remittance-card">
           <div class="panel-header"><div><h2>Chuyển nộp bảo hiểm</h2><p>Đối chiếu số đã thu với số đã chuyển cho đơn vị bảo hiểm; mỗi khoản đã chuyển được khóa theo học sinh để tránh chuyển trùng.</p></div><span class="mini-tag">ĐỐI CHIẾU</span></div>
           <div class="insurance-remittance-grid">
