@@ -155,3 +155,12 @@
 .panel-header.compact{margin-bottom:8px}
 @media(max-width:1100px){.insurance-remittance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.insurance-remittance-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.insurance-remittance-grid{grid-template-columns:1fr}.insurance-remittance-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.unpaid-report-card{padding:19px;margin-bottom:16px}
+.unpaid-report-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.unpaid-report-fees{grid-column:1/-1}
+.unpaid-report-fees select{min-height:150px}
+.unpaid-report-fees small{font-size:9px;color:var(--muted);margin-top:5px}
+.unpaid-report-actions{margin-top:13px}
+.paid-report-export-buttons{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:700px){.unpaid-report-grid{grid-template-columns:1fr}.paid-report-export-buttons{width:100%}.paid-report-export-buttons .button{flex:1 1 100%}}
